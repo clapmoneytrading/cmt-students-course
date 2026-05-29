@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Edit Video | CMT Students</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <img src="/logo.svg" alt="Clap Money Trading" class="brand-logo" />
+        <div>
+          <h1 class="brand-title">Edit Video</h1>
+          <p class="brand-subtitle">Update lesson details and access rules</p>
+        </div>
+      </div>
+      <div class="topbar-actions">
+        <a href="/admin" class="btn-link">Back to Admin</a>
+      </div>
+    </header>
+
+    <main class="container">
+      <section class="card">
+        <% if (error) { %>
+          <div class="alert"><%= error %></div>
+        <% } %>
+
+        <form method="post" action="/admin/videos/<%= video.id %>/edit" class="form-grid">
+          <label>Video Title</label>
+          <input type="text" name="title" value="<%= video.title %>" required />
+
+          <label>Description</label>
+          <textarea name="description" rows="4"><%= video.description || '' %></textarea>
+
+          <label>Topic</label>
+          <input type="text" name="topic" value="<%= video.topic || '' %>" placeholder="Price Action / Risk Management / Options" />
+
+          <label>Level</label>
+          <select name="level" required>
+            <option value="beginner" <%= (video.level || 'beginner') === 'beginner' ? 'selected' : '' %>>Beginner</option>
+            <option value="intermediate" <%= video.level === 'intermediate' ? 'selected' : '' %>>Intermediate</option>
+            <option value="advanced" <%= video.level === 'advanced' ? 'selected' : '' %>>Advanced</option>
+          </select>
+
+          <label>Access Type</label>
+          <select name="access_type" required>
+            <option value="free" <%= video.access_type === 'free' ? 'selected' : '' %>>Free Course</option>
+            <option value="paid" <%= video.access_type === 'paid' ? 'selected' : '' %>>Paid Course</option>
+          </select>
+
+          <label>Module</label>
+          <select name="module_id">
+            <option value="" <%= !video.module_id ? 'selected' : '' %>>General Lessons (No Module)</option>
+            <% modules.forEach((module) => { %>
+              <option value="<%= module.id %>" <%= video.module_id === module.id ? 'selected' : '' %>>
+                <%= module.title %> (<%= module.access_type.toUpperCase() %>)
+              </option>
+            <% }) %>
+          </select>
+
+          <label>Lesson Order</label>
+          <input type="number" name="lesson_order" min="0" value="<%= video.lesson_order || 0 %>" />
+
+          <label>Video Source</label>
+          <select name="source_type" id="sourceType" required>
+            <option value="upload" <%= (video.source_type || 'upload') === 'upload' ? 'selected' : '' %>>Upload File</option>
+            <option value="youtube" <%= video.source_type === 'youtube' ? 'selected' : '' %>>YouTube Link</option>
+          </select>
+
+          <div id="youtubeSourceFields" class="form-grid" style="display: none">
+            <label>YouTube Video URL</label>
+            <input id="youtubeUrlInput" type="url" name="youtube_url" value="<%= video.youtube_url || '' %>" placeholder="https://www.youtube.com/watch?v=xxxxxxxxxxx" />
+            <p class="muted helper">Use Unlisted visibility for privacy. Fully private YouTube videos may not play for students.</p>
+          </div>
+
+          <button type="submit">Save Changes</button>
+        </form>
+      </section>
+    </main>
+
+    <script>
+      (function () {
+        const sourceType = document.getElementById("sourceType");
+        const youtubeSourceFields = document.getElementById("youtubeSourceFields");
+        const youtubeUrlInput = document.getElementById("youtubeUrlInput");
+
+        function syncSourceFields() {
+          const isYoutube = sourceType && sourceType.value === "youtube";
+          youtubeSourceFields.style.display = isYoutube ? "grid" : "none";
+          youtubeUrlInput.required = isYoutube;
+        }
+
+        if (sourceType) {
+          sourceType.addEventListener("change", syncSourceFields);
+          syncSourceFields();
+        }
+      })();
+    </script>
+  </body>
+</html>

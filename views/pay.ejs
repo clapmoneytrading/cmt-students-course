@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Payment | CMT Students</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <img src="/logo.svg" alt="Clap Money Trading" class="brand-logo" />
+        <div>
+          <h1 class="brand-title">Pay for Paid Course</h1>
+          <p class="brand-subtitle">Scan QR, pay on phone, submit proof</p>
+        </div>
+      </div>
+      <div class="topbar-actions">
+        <a href="/dashboard" class="btn-link">Back to Dashboard</a>
+      </div>
+    </header>
+
+    <main class="container pay-grid">
+      <section class="card">
+        <h2>Scan and Pay from Phone</h2>
+        <p class="muted">Use any UPI app or payment app on your phone to pay.</p>
+
+        <p class="price-line">
+          Course Price: <strong><%= payment.coursePrice.toFixed(2) %></strong>
+        </p>
+
+        <div class="qr-wrap">
+          <img src="<%= payment.qrImage %>" alt="Payment QR" class="qr-image" />
+        </div>
+
+        <ul class="pay-meta">
+          <li>Receiver: <strong><%= payment.name %></strong></li>
+          <% if (payment.upiId) { %><li>UPI ID: <strong><%= payment.upiId %></strong></li><% } %>
+          <% if (payment.phone) { %><li>Phone: <strong><%= payment.phone %></strong></li><% } %>
+        </ul>
+
+        <p class="muted">
+          After payment, submit amount, transaction reference, and screenshot proof.
+        </p>
+      </section>
+
+      <section class="card">
+        <h2>Submit Payment Proof</h2>
+
+        <% if (error) { %>
+          <div class="alert"><%= error %></div>
+        <% } %>
+        <% if (success) { %>
+          <div class="alert success"><%= success %></div>
+        <% } %>
+        <% if (promoMessage) { %>
+          <div class="alert success"><%= promoMessage %></div>
+        <% } %>
+
+        <form method="post" action="/pay" enctype="multipart/form-data" class="form-grid">
+          <label>Promo Code (optional)</label>
+          <input type="text" name="promo_code" placeholder="Example: CMT10" />
+
+          <label>Amount Paid</label>
+          <input type="number" name="amount" step="0.01" min="1" required />
+
+          <label>Transaction Reference (UTR/Txn ID)</label>
+          <input type="text" name="transaction_ref" placeholder="Optional if screenshot is uploaded" />
+
+          <label>Payment Screenshot</label>
+          <input type="file" name="proof" accept="image/*" />
+
+          <button type="submit">Submit for Approval</button>
+        </form>
+      </section>
+
+      <section class="card">
+        <h2>Your Payment Requests</h2>
+        <% if (!requests.length) { %>
+          <p class="muted">No payment request submitted yet.</p>
+        <% } else { %>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Promo</th>
+                  <th>Discount</th>
+                  <th>Expected</th>
+                  <th>Amount</th>
+                  <th>Reference</th>
+                  <th>Status</th>
+                  <th>Admin Note</th>
+                </tr>
+              </thead>
+              <tbody>
+                <% requests.forEach((row) => { %>
+                  <tr>
+                    <td><%= row.created_at %></td>
+                    <td><%= row.promo_code || '-' %></td>
+                    <td><%= Number(row.discount_amount || 0).toFixed(2) %></td>
+                    <td><%= Number(row.expected_amount || 0).toFixed(2) %></td>
+                    <td><%= row.amount %></td>
+                    <td><%= row.transaction_ref || '-' %></td>
+                    <td>
+                      <span class="pill <%= row.status === 'approved' ? 'pill-free' : row.status === 'rejected' ? 'pill-danger' : 'pill-paid' %>">
+                        <%= row.status.toUpperCase() %>
+                      </span>
+                    </td>
+                    <td><%= row.admin_note || '-' %></td>
+                  </tr>
+                <% }) %>
+              </tbody>
+            </table>
+          </div>
+        <% } %>
+      </section>
+    </main>
+  </body>
+</html>

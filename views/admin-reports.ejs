@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Admin Reports | CMT Students</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <img src="/logo.svg" alt="Clap Money Trading" class="brand-logo" />
+        <div>
+          <h1 class="brand-title">Student Progress Reports</h1>
+          <p class="brand-subtitle">Track enrollment, paid conversions, and completion</p>
+        </div>
+      </div>
+      <div class="topbar-actions">
+        <a href="/admin" class="btn-link">Admin Home</a>
+        <a href="/admin/posts" class="btn-link">Manage Posts</a>
+        <a href="/dashboard" class="btn-link">Student Dashboard</a>
+        <form method="post" action="/logout">
+          <button type="submit" class="danger">Logout</button>
+        </form>
+      </div>
+    </header>
+
+    <main class="container admin-grid">
+      <section class="card stat-grid">
+        <article class="stat-card">
+          <h3>Total Students</h3>
+          <p><%= overview.total_students %></p>
+        </article>
+        <article class="stat-card">
+          <h3>Paid Students</h3>
+          <p><%= overview.paid_students %></p>
+        </article>
+        <article class="stat-card">
+          <h3>Free Students</h3>
+          <p><%= overview.free_students %></p>
+        </article>
+        <article class="stat-card">
+          <h3>Average Completion</h3>
+          <p><%= overview.avg_completion %>%</p>
+        </article>
+      </section>
+
+      <section class="card">
+        <h2>Student Progress Table</h2>
+        <form method="get" action="/admin/reports" class="form-grid" style="margin-bottom: 14px">
+          <label>Plan Filter</label>
+          <select name="plan">
+            <option value="all" <%= filters.plan === 'all' ? 'selected' : '' %>>All Students</option>
+            <option value="free" <%= filters.plan === 'free' ? 'selected' : '' %>>Free Students</option>
+            <option value="paid" <%= filters.plan === 'paid' ? 'selected' : '' %>>Paid Students</option>
+          </select>
+
+          <label>Module Filter</label>
+          <select name="module">
+            <option value="" <%= filters.module === null ? 'selected' : '' %>>All Modules</option>
+            <option value="0" <%= filters.module === 0 ? 'selected' : '' %>>General Lessons (No Module)</option>
+            <% modules.forEach((module) => { %>
+              <option value="<%= module.id %>" <%= filters.module === module.id ? 'selected' : '' %>>
+                <%= module.title %>
+              </option>
+            <% }) %>
+          </select>
+
+          <div class="topbar-actions">
+            <button type="submit">Apply Filters</button>
+            <a href="/admin/reports" class="btn-link">Reset</a>
+          </div>
+        </form>
+
+        <% if (!studentProgress.length) { %>
+          <p class="muted">No students available for reporting yet.</p>
+        <% } else { %>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Email</th>
+                  <th>Plan</th>
+                  <th>Completed</th>
+                  <th>Progress</th>
+                  <th>Last Login</th>
+                </tr>
+              </thead>
+              <tbody>
+                <% studentProgress.forEach((row) => { %>
+                  <tr>
+                    <td><%= row.name %></td>
+                    <td><span class="muted"><%= row.email %></span></td>
+                    <td><%= row.has_paid_access ? 'Paid' : 'Free' %></td>
+                    <td><%= row.completed_lessons %> / <%= row.total_lessons %></td>
+                    <td>
+                      <div class="progress-track">
+                        <div class="progress-fill" style="width: <%= row.completion_percent %>%"></div>
+                      </div>
+                      <span class="muted"><%= row.completion_percent %>%</span>
+                    </td>
+                    <td><%= row.last_login || '-' %></td>
+                  </tr>
+                <% }) %>
+              </tbody>
+            </table>
+          </div>
+        <% } %>
+      </section>
+    </main>
+  </body>
+</html>

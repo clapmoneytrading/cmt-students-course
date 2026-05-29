@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Edit Module | CMT Students</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <img src="/logo.svg" alt="Clap Money Trading" class="brand-logo" />
+        <div>
+          <h1 class="brand-title">Edit Module</h1>
+          <p class="brand-subtitle">Configure module lock and lesson order</p>
+        </div>
+      </div>
+      <div class="topbar-actions">
+        <a href="/admin" class="btn-link">Back to Admin</a>
+      </div>
+    </header>
+
+    <main class="container">
+      <section class="card">
+        <% if (error) { %>
+          <div class="alert"><%= error %></div>
+        <% } %>
+
+        <form method="post" action="/admin/modules/<%= module.id %>/edit" class="form-grid">
+          <label>Module Title</label>
+          <input type="text" name="title" value="<%= module.title %>" required />
+
+          <label>Description</label>
+          <textarea name="description" rows="4"><%= module.description || '' %></textarea>
+
+          <label>Access Type</label>
+          <select name="access_type" required>
+            <option value="free" <%= module.access_type === 'free' ? 'selected' : '' %>>Free</option>
+            <option value="paid" <%= module.access_type === 'paid' ? 'selected' : '' %>>Paid</option>
+          </select>
+
+          <label>Roadmap Level</label>
+          <select name="level" required>
+            <option value="beginner" <%= (module.level || 'beginner') === 'beginner' ? 'selected' : '' %>>Beginner</option>
+            <option value="intermediate" <%= module.level === 'intermediate' ? 'selected' : '' %>>Intermediate</option>
+            <option value="advanced" <%= module.level === 'advanced' ? 'selected' : '' %>>Advanced</option>
+          </select>
+
+          <label>Sort Order</label>
+          <input type="number" name="sort_order" min="0" value="<%= module.sort_order %>" required />
+
+          <button type="submit">Save Module</button>
+        </form>
+      </section>
+    </main>
+  </body>
+</html>

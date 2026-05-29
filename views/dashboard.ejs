@@ -1,0 +1,476 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Dashboard | CMT Students</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <img src="/logo.svg" alt="Clap Money Trading" class="brand-logo" />
+        <div>
+          <h1 class="brand-title">Clap Money Trading</h1>
+          <p class="brand-subtitle">Welcome, <%= currentUser.name %></p>
+        </div>
+      </div>
+      <div class="topbar-actions">
+        <a href="/posts" class="btn-link">Posts</a>
+        <% if (currentUser.is_admin) { %>
+          <a href="/admin" class="btn-link">Admin Panel</a>
+        <% } %>
+        <form method="post" action="/logout">
+          <button type="submit" class="danger">Logout</button>
+        </form>
+      </div>
+    </header>
+
+    <main class="container">
+      <section class="card hero-banner">
+        <div class="hero-head">
+          <div>
+            <p class="status-line">
+              Access: <strong><%= currentUser.has_paid_access ? "Paid + Free" : "Free" %></strong>
+            </p>
+            <h2>Your Progress</h2>
+            <p class="muted">
+              Completed <strong><%= completion.completedLessons %></strong> of <strong><%= completion.totalLessons %></strong>
+              lessons.
+            </p>
+          </div>
+          <div class="progress-ring-wrap">
+            <div class="progress-ring" style="--percent: <%= completion.completionPercent %>">
+              <span><%= completion.completionPercent %>%</span>
+            </div>
+          </div>
+        </div>
+        <div class="progress-track large">
+          <div class="progress-fill" style="width: <%= completion.completionPercent %>%"></div>
+        </div>
+      </section>
+
+      <section class="card roadmap-card">
+        <h2>Roadmap</h2>
+        <div class="roadmap">
+          <% roadmap.forEach((step) => {
+               const hasBadge = completion.badges.some((b) => b.startsWith(step.toUpperCase()));
+          %>
+            <div class="road-step <%= hasBadge ? 'road-step-done' : '' %>">
+              <span><%= step.toUpperCase() %></span>
+            </div>
+          <% }) %>
+        </div>
+        <div class="badge-row">
+          <% if (!completion.badges.length) { %>
+            <p class="muted">No milestone badges yet. Complete a module to earn badges.</p>
+          <% } else { %>
+            <% completion.badges.forEach((badge) => { %>
+              <span class="badge-pill"><%= badge %> Badge</span>
+            <% }) %>
+          <% } %>
+        </div>
+
+        <% if (certificateToken) { %>
+          <div class="certificate-actions">
+            <a href="/certificate/download" class="btn-link">Download Certificate PDF</a>
+            <button type="button" id="shareCertBtn">Copy Share Link</button>
+            <span id="shareCertMsg" class="muted"></span>
+          </div>
+        <% } %>
+      </section>
+
+      <% if (!currentUser.has_paid_access) { %>
+        <section class="card callout">
+          <h2>Unlock Paid Course</h2>
+          <p class="muted">Pay by scanning QR code with your phone and submit payment proof.</p>
+          <a href="/pay" class="btn-link">Pay and Upgrade</a>
+        </section>
+      <% } %>
+
+      <% if (freeGroupUrl || (currentUser.has_paid_access && paidGroupUrl)) { %>
+        <section class="card callout">
+          <h2>WhatsApp Learning Groups</h2>
+          <p class="muted">You can stay in Free group and, after paid access, also join Paid group.</p>
+          <div class="topbar-actions">
+            <% if (freeGroupUrl) { %>
+              <a href="<%= freeGroupUrl %>" target="_blank" rel="noopener" class="btn-link">Join Free Group</a>
+            <% } %>
+            <% if (currentUser.has_paid_access && paidGroupUrl) { %>
+              <a href="<%= paidGroupUrl %>" target="_blank" rel="noopener" class="btn-link">Join Paid Group</a>
+            <% } %>
+          </div>
+        </section>
+      <% } %>
+
+      <% if (continueWatching.length) { %>
+        <section class="card">
+          <h2>Continue Watching</h2>
+          <div class="continue-grid">
+            <% continueWatching.forEach((video) => { %>
+              <article class="continue-card">
+                <h3 class="thumb-title"><%= video.title %></h3>
+                <p class="muted"><%= video.topic || 'General Topic' %> | <%= (video.level || 'beginner').toUpperCase() %></p>
+                <div class="progress-track">
+                  <div class="progress-fill" style="width: <%= video.progress_percent %>%"></div>
+                </div>
+                <p class="muted">Progress: <%= video.progress_percent %>%</p>
+                <a href="#lesson-<%= video.id %>" class="btn-link">Resume Lesson</a>
+              </article>
+            <% }) %>
+          </div>
+        </section>
+      <% } %>
+
+      <section class="card">
+        <h2>Find Lessons</h2>
+        <div class="filter-bar">
+          <input id="lessonSearch" type="text" placeholder="Search by lesson title or topic" />
+          <select id="topicFilter">
+            <option value="">All Topics</option>
+            <% topicOptions.forEach((topic) => { %>
+              <option value="<%= topic %>"><%= topic %></option>
+            <% }) %>
+          </select>
+          <select id="levelFilter">
+            <option value="">All Levels</option>
+            <% levelOptions.forEach((level) => { %>
+              <option value="<%= level %>"><%= level.toUpperCase() %></option>
+            <% }) %>
+          </select>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Course Modules</h2>
+        <% if (!modules.length) { %>
+          <p class="muted">No modules available yet. Ask admin to add course content.</p>
+        <% } else { %>
+          <div class="module-grid">
+            <% modules.forEach((module) => { %>
+              <article class="module-card <%= module.locked ? 'module-locked' : '' %>">
+                <div class="module-head">
+                  <h3><%= module.title %></h3>
+                  <span class="pill <%= module.access_type === 'paid' ? 'pill-paid' : 'pill-free' %>">
+                    <%= module.access_type.toUpperCase() %>
+                  </span>
+                </div>
+                <p class="muted"><%= module.description || 'No description' %></p>
+
+                <% if (module.locked) { %>
+                  <p class="locked-note">This module is locked. Upgrade to paid access.</p>
+                <% } else if (!module.lessons.length) { %>
+                  <p class="muted">No lessons in this module yet.</p>
+                <% } else { %>
+                  <div class="video-grid">
+                    <% module.lessons.forEach((video) => {
+                         const p = progressByVideo[video.id] || { progress_seconds: 0, duration_seconds: 0, completed: false };
+                         const isFav = favoriteVideoIds.includes(video.id);
+                    %>
+                      <article
+                        class="video-card lesson-card"
+                        id="lesson-<%= video.id %>"
+                        data-title="<%= video.title.toLowerCase() %>"
+                        data-topic="<%= (video.topic || '').toLowerCase() %>"
+                        data-level="<%= (video.level || 'beginner').toLowerCase() %>"
+                      >
+                        <div class="lesson-head">
+                          <h4 class="thumb-title"><%= video.title %></h4>
+                          <button type="button" class="favorite-btn <%= isFav ? 'favorited' : '' %>" data-favorite-video-id="<%= video.id %>">
+                            <%= isFav ? '★ Favorite' : '☆ Favorite' %>
+                          </button>
+                        </div>
+                        <p class="muted"><%= video.description || "No description" %></p>
+                        <p class="muted"><%= video.topic || 'General Topic' %> | <%= (video.level || 'beginner').toUpperCase() %></p>
+                        <p class="pill <%= video.access_type === 'paid' ? 'pill-paid' : 'pill-free' %>">
+                          <%= video.access_type.toUpperCase() %>
+                        </p>
+                        <p class="muted progress-label" data-progress-label="<%= video.id %>">
+                          <%= p.completed ? 'Completed' : 'Progress saved' %>
+                        </p>
+                        <div class="lesson-media-wrap">
+                        <% if (video.source_type === 'youtube' && video.youtube_url) { %>
+                          <iframe
+                            class="lesson-embed"
+                            src="<%= video.youtube_url %>"
+                            title="<%= video.title %>"
+                            loading="lazy"
+                            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                            referrerpolicy="strict-origin-when-cross-origin"
+                            allowfullscreen
+                          ></iframe>
+                          <p class="muted">Hosted on YouTube (private access managed in this portal).</p>
+                        <% } else { %>
+                          <video
+                            controls
+                            preload="metadata"
+                            src="/video/<%= video.id %>"
+                            data-video-id="<%= video.id %>"
+                            data-start-seconds="<%= p.progress_seconds || 0 %>"
+                            controlslist="nodownload noplaybackrate noremoteplayback"
+                            disablepictureinpicture
+                          ></video>
+                        <% } %>
+                          <div class="lesson-watermark" data-watermark data-student-email="<%= currentUser.email %>"></div>
+                        </div>
+                        <button
+                          type="button"
+                          class="mark-complete-btn"
+                          data-complete-video-id="<%= video.id %>"
+                          <%= p.completed ? 'disabled' : '' %>
+                        >
+                          <%= p.completed ? 'Completed' : 'Mark as Complete' %>
+                        </button>
+                      </article>
+                    <% }) %>
+                  </div>
+                <% } %>
+              </article>
+            <% }) %>
+          </div>
+        <% } %>
+      </section>
+    </main>
+
+    <script>
+      (function () {
+        const players = document.querySelectorAll("video[data-video-id]");
+        const searchInput = document.getElementById("lessonSearch");
+        const topicFilter = document.getElementById("topicFilter");
+        const levelFilter = document.getElementById("levelFilter");
+        const lessonCards = document.querySelectorAll(".lesson-card");
+        const favoriteButtons = document.querySelectorAll("[data-favorite-video-id]");
+        const completeButtons = document.querySelectorAll("[data-complete-video-id]");
+        const shareCertBtn = document.getElementById("shareCertBtn");
+        const shareCertMsg = document.getElementById("shareCertMsg");
+        const embeds = document.querySelectorAll(".lesson-embed");
+        const watermarks = document.querySelectorAll("[data-watermark]");
+
+        function formatWatermarkTime() {
+          const now = new Date();
+          return now.toLocaleString();
+        }
+
+        function setWatermarkText() {
+          watermarks.forEach(function (wm) {
+            const email = wm.getAttribute("data-student-email") || "student";
+            wm.textContent = email + " | " + formatWatermarkTime();
+          });
+        }
+
+        function moveWatermarks() {
+          watermarks.forEach(function (wm) {
+            const left = 8 + Math.round(Math.random() * 55);
+            const top = 8 + Math.round(Math.random() * 70);
+            wm.style.left = left + "%";
+            wm.style.top = top + "%";
+          });
+        }
+
+        setWatermarkText();
+        moveWatermarks();
+        setInterval(function () {
+          setWatermarkText();
+          moveWatermarks();
+        }, 15000);
+
+        function applyFilters() {
+          const q = (searchInput && searchInput.value ? searchInput.value : "").trim().toLowerCase();
+          const topic = (topicFilter && topicFilter.value ? topicFilter.value : "").trim().toLowerCase();
+          const level = (levelFilter && levelFilter.value ? levelFilter.value : "").trim().toLowerCase();
+
+          lessonCards.forEach(function (card) {
+            const title = card.getAttribute("data-title") || "";
+            const cardTopic = card.getAttribute("data-topic") || "";
+            const cardLevel = card.getAttribute("data-level") || "";
+
+            const passSearch = !q || title.indexOf(q) >= 0 || cardTopic.indexOf(q) >= 0;
+            const passTopic = !topic || cardTopic === topic;
+            const passLevel = !level || cardLevel === level;
+
+            card.style.display = passSearch && passTopic && passLevel ? "block" : "none";
+          });
+        }
+
+        if (searchInput) {
+          searchInput.addEventListener("input", applyFilters);
+        }
+        if (topicFilter) {
+          topicFilter.addEventListener("change", applyFilters);
+        }
+        if (levelFilter) {
+          levelFilter.addEventListener("change", applyFilters);
+        }
+
+        favoriteButtons.forEach(function (button) {
+          button.addEventListener("click", function () {
+            const videoId = button.getAttribute("data-favorite-video-id");
+            fetch("/api/favorites/" + videoId, { method: "POST" })
+              .then(function (r) {
+                return r.json();
+              })
+              .then(function (payload) {
+                if (!payload || !payload.ok) {
+                  return;
+                }
+
+                if (payload.favorited) {
+                  button.classList.add("favorited");
+                  button.textContent = "★ Favorite";
+                } else {
+                  button.classList.remove("favorited");
+                  button.textContent = "☆ Favorite";
+                }
+              })
+              .catch(function () {
+                // Ignore silent favorite failures.
+              });
+          });
+        });
+
+        if (shareCertBtn && shareCertMsg) {
+          shareCertBtn.addEventListener("click", function () {
+            fetch("/certificate/share")
+              .then(function (r) {
+                return r.json();
+              })
+              .then(function (payload) {
+                if (!payload || !payload.url) {
+                  shareCertMsg.textContent = "Unable to create share link.";
+                  return;
+                }
+
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                  navigator.clipboard.writeText(payload.url).then(function () {
+                    shareCertMsg.textContent = "Share link copied.";
+                  });
+                  return;
+                }
+
+                shareCertMsg.textContent = payload.url;
+              })
+              .catch(function () {
+                shareCertMsg.textContent = "Unable to create share link.";
+              });
+          });
+        }
+
+        function postProgress(videoEl, completedFlag) {
+          const videoId = videoEl.getAttribute("data-video-id");
+          const params = new URLSearchParams();
+          params.set("progress_seconds", String(videoEl.currentTime || 0));
+          params.set("duration_seconds", String(videoEl.duration || 0));
+          params.set("completed", completedFlag ? "1" : "0");
+
+          fetch("/api/progress/" + videoId, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/x-www-form-urlencoded"
+            },
+            body: params.toString()
+          }).catch(function () {
+            // Ignore occasional network hiccups and continue playback.
+          });
+
+          const label = document.querySelector('[data-progress-label="' + videoId + '"]');
+          if (label) {
+            if (completedFlag) {
+              label.textContent = "Completed";
+            } else {
+              const percent = videoEl.duration > 0 ? Math.round((videoEl.currentTime / videoEl.duration) * 100) : 0;
+              label.textContent = "Progress: " + percent + "%";
+            }
+          }
+        }
+
+        function markLessonComplete(videoId, buttonEl) {
+          const params = new URLSearchParams();
+          params.set("progress_seconds", "1");
+          params.set("duration_seconds", "1");
+          params.set("completed", "1");
+
+          fetch("/api/progress/" + videoId, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/x-www-form-urlencoded"
+            },
+            body: params.toString()
+          })
+            .then(function (r) {
+              return r.json();
+            })
+            .then(function (payload) {
+              if (!payload || !payload.ok) {
+                return;
+              }
+
+              const label = document.querySelector('[data-progress-label="' + videoId + '"]');
+              if (label) {
+                label.textContent = "Completed";
+              }
+
+              if (buttonEl) {
+                buttonEl.disabled = true;
+                buttonEl.textContent = "Completed";
+              }
+            })
+            .catch(function () {
+              // Ignore occasional network hiccups.
+            });
+        }
+
+        completeButtons.forEach(function (button) {
+          button.addEventListener("click", function () {
+            const videoId = button.getAttribute("data-complete-video-id");
+            if (!videoId || button.disabled) {
+              return;
+            }
+            markLessonComplete(videoId, button);
+          });
+        });
+
+        players.forEach(function (videoEl) {
+          let lastSentAt = 0;
+          const resumeAt = Number(videoEl.getAttribute("data-start-seconds") || 0);
+
+          videoEl.addEventListener("loadedmetadata", function () {
+            if (resumeAt > 0 && resumeAt < videoEl.duration - 2) {
+              videoEl.currentTime = resumeAt;
+            }
+          });
+
+          videoEl.addEventListener("timeupdate", function () {
+            const now = Date.now();
+            if (now - lastSentAt > 10000) {
+              lastSentAt = now;
+              postProgress(videoEl, false);
+            }
+          });
+
+          videoEl.addEventListener("pause", function () {
+            postProgress(videoEl, false);
+          });
+
+          videoEl.addEventListener("ended", function () {
+            postProgress(videoEl, true);
+          });
+
+          videoEl.addEventListener("contextmenu", function (event) {
+            event.preventDefault();
+          });
+
+          videoEl.addEventListener("dragstart", function (event) {
+            event.preventDefault();
+          });
+        });
+
+        embeds.forEach(function (embed) {
+          embed.addEventListener("contextmenu", function (event) {
+            event.preventDefault();
+          });
+        });
+      })();
+    </script>
+  </body>
+</html>

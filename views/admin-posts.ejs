@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Admin Posts | CMT Students</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <img src="/logo.svg" alt="Clap Money Trading" class="brand-logo" />
+        <div>
+          <h1 class="brand-title">Post Management</h1>
+          <p class="brand-subtitle">Publish updates for free and paid students</p>
+        </div>
+      </div>
+      <div class="topbar-actions">
+        <a href="/admin" class="btn-link">Admin Home</a>
+        <a href="/admin/reports" class="btn-link">Reports</a>
+        <a href="/posts" class="btn-link">Student View</a>
+        <form method="post" action="/logout">
+          <button type="submit" class="danger">Logout</button>
+        </form>
+      </div>
+    </header>
+
+    <main class="container admin-grid">
+      <section class="card">
+        <h2>Create Post</h2>
+        <% if (error) { %>
+          <p class="error"><%= error %></p>
+        <% } %>
+        <form method="post" action="/admin/posts" class="form-grid module-form">
+          <label>Title</label>
+          <input type="text" name="title" required />
+
+          <label>Access Type</label>
+          <select name="access_type" required>
+            <option value="free">Free students</option>
+            <option value="paid">Paid students only</option>
+          </select>
+
+          <label>Content</label>
+          <textarea name="content" rows="7" required></textarea>
+
+          <button type="submit">Publish Post</button>
+        </form>
+      </section>
+
+      <section class="card">
+        <h2>Published Posts</h2>
+        <% if (!posts.length) { %>
+          <p class="muted">No posts published yet.</p>
+        <% } else { %>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Title</th>
+                  <th>Access</th>
+                  <th>Author</th>
+                  <th>Created</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                <% posts.forEach((post) => { %>
+                  <tr>
+                    <td>
+                      <strong><%= post.title %></strong><br />
+                      <span class="muted"><%= post.content.length > 120 ? post.content.slice(0, 120) + '...' : post.content %></span>
+                    </td>
+                    <td>
+                      <span class="pill <%= post.access_type === 'paid' ? 'pill-paid' : 'pill-free' %>">
+                        <%= post.access_type.toUpperCase() %>
+                      </span>
+                    </td>
+                    <td><%= post.author_name || 'Admin' %></td>
+                    <td><%= post.created_at %></td>
+                    <td>
+                      <form method="post" action="/admin/posts/<%= post.id %>/delete" class="inline-form">
+                        <button type="submit" class="danger">Delete</button>
+                      </form>
+                    </td>
+                  </tr>
+                <% }) %>
+              </tbody>
+            </table>
+          </div>
+        <% } %>
+      </section>
+    </main>
+  </body>
+</html>

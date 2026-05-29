@@ -1,0 +1,466 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Admin | CMT Students</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <img src="/logo.svg" alt="Clap Money Trading" class="brand-logo" />
+        <div>
+          <h1 class="brand-title">Admin Panel</h1>
+          <p class="brand-subtitle">Manage students, modules, lessons, and payments</p>
+        </div>
+      </div>
+      <div class="topbar-actions">
+        <a href="/dashboard" class="btn-link">Student Dashboard</a>
+        <a href="/admin/reports" class="btn-link">Progress Reports</a>
+        <a href="/admin/posts" class="btn-link">Manage Posts</a>
+        <a href="/admin/videos/upload" class="btn-link">Upload Video</a>
+        <form method="post" action="/logout">
+          <button type="submit" class="danger">Logout</button>
+        </form>
+      </div>
+    </header>
+
+    <main class="container admin-grid">
+      <section class="card stat-grid">
+        <article class="stat-card">
+          <h3>Total Students</h3>
+          <p><%= summary.total_students %></p>
+        </article>
+        <article class="stat-card">
+          <h3>Paid Students</h3>
+          <p><%= summary.paid_students %></p>
+        </article>
+        <article class="stat-card">
+          <h3>Free Students</h3>
+          <p><%= summary.free_students %></p>
+        </article>
+        <article class="stat-card">
+          <h3>Pending Payments</h3>
+          <p><%= summary.pending_payments %></p>
+        </article>
+        <article class="stat-card">
+          <h3>Total Posts</h3>
+          <p><%= postSummary.total_posts %></p>
+        </article>
+        <article class="stat-card">
+          <h3>Paid Posts</h3>
+          <p><%= postSummary.paid_posts %></p>
+        </article>
+      </section>
+
+      <section class="card">
+        <h2>Course Modules</h2>
+        <form method="post" action="/admin/modules" class="form-grid module-form">
+          <label>Module Title</label>
+          <input type="text" name="title" required />
+
+          <label>Description</label>
+          <textarea name="description" rows="3"></textarea>
+
+          <label>Access Type</label>
+          <select name="access_type" required>
+            <option value="free">Free</option>
+            <option value="paid">Paid</option>
+          </select>
+
+          <label>Roadmap Level</label>
+          <select name="level" required>
+            <option value="beginner">Beginner</option>
+            <option value="intermediate">Intermediate</option>
+            <option value="advanced">Advanced</option>
+          </select>
+
+          <label>Sort Order</label>
+          <input type="number" name="sort_order" min="0" value="0" />
+
+          <button type="submit">Create Module</button>
+        </form>
+
+        <% if (!modules.length) { %>
+          <p class="muted">No modules yet.</p>
+        <% } else { %>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Title</th>
+                  <th>Access</th>
+                  <th>Level</th>
+                  <th>Order</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                <% modules.forEach((module) => { %>
+                  <tr>
+                    <td>
+                      <strong><%= module.title %></strong><br />
+                      <span class="muted"><%= module.description || '-' %></span>
+                    </td>
+                    <td>
+                      <span class="pill <%= module.access_type === 'paid' ? 'pill-paid' : 'pill-free' %>">
+                        <%= module.access_type.toUpperCase() %>
+                      </span>
+                    </td>
+                    <td><%= (module.level || 'beginner').toUpperCase() %></td>
+                    <td><%= module.sort_order %></td>
+                    <td>
+                      <a href="/admin/modules/<%= module.id %>/edit" class="btn-link">Edit</a>
+                      <form method="post" action="/admin/modules/<%= module.id %>/delete" class="inline-form">
+                        <button type="submit" class="danger">Delete</button>
+                      </form>
+                    </td>
+                  </tr>
+                <% }) %>
+              </tbody>
+            </table>
+          </div>
+        <% } %>
+      </section>
+
+      <section class="card">
+        <h2>Students</h2>
+        <div class="topbar-actions section-actions">
+          <a href="/admin/export/students.csv" class="btn-link">Export Students CSV</a>
+        </div>
+        <form id="bulkAccessForm" method="post" action="/admin/users/bulk-access" class="bulk-form">
+        </form>
+        <div class="bulk-actions">
+          <button type="button" id="selectAllStudents">Select All</button>
+          <button type="submit" form="bulkAccessForm" name="action" value="grant">Grant Paid Access (Selected)</button>
+          <button type="submit" form="bulkAccessForm" name="action" value="revoke" class="danger">Revoke Paid Access (Selected)</button>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Select</th>
+                <th>Name</th>
+                <th>Email</th>
+                <th>Phone</th>
+                <th>Last Login</th>
+                <th>Videos Watched</th>
+                <th>Paid Access</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              <% users.forEach((user) => { %>
+                <tr>
+                  <td>
+                    <% if (!user.is_admin) { %>
+                      <input type="checkbox" class="bulk-student" name="user_ids" value="<%= user.id %>" form="bulkAccessForm" />
+                    <% } %>
+                  </td>
+                  <td><%= user.name %> <%= user.is_admin ? '(Admin)' : '' %></td>
+                  <td><%= user.email %></td>
+                  <td><%= user.phone || '-' %></td>
+                  <td><%= user.last_login || '-' %></td>
+                  <td><%= user.watched_count || 0 %></td>
+                  <td><%= user.has_paid_access ? 'Yes' : 'No' %></td>
+                  <td>
+                    <% if (!user.is_admin) { %>
+                      <form method="post" action="/admin/users/<%= user.id %>/access" class="inline-form">
+                        <label class="inline-checkbox">
+                          <input type="checkbox" name="has_paid_access" <%= user.has_paid_access ? 'checked' : '' %> />
+                          Paid
+                        </label>
+                        <button type="submit">Save</button>
+                      </form>
+                      <form method="post" action="/admin/users/<%= user.id %>/delete" class="inline-form">
+                        <button type="submit" class="danger">Delete User</button>
+                      </form>
+                    <% } else { %>
+                      <span class="muted">Protected account</span>
+                    <% } %>
+                  </td>
+                </tr>
+              <% }) %>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Uploaded Videos</h2>
+        <% if (!videos.length) { %>
+          <p class="muted">No videos uploaded yet.</p>
+        <% } else { %>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Title</th>
+                  <th>Module</th>
+                  <th>Lesson Order</th>
+                  <th>Topic</th>
+                  <th>Level</th>
+                  <th>Source</th>
+                  <th>Description</th>
+                  <th>Access</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                <% videos.forEach((video) => { %>
+                  <tr>
+                    <td><strong><%= video.title %></strong></td>
+                    <td><span class="muted"><%= video.module_title || 'General Lessons' %></span></td>
+                    <td><%= video.lesson_order || 0 %></td>
+                    <td><span class="muted"><%= video.topic || '-' %></span></td>
+                    <td><%= (video.level || 'beginner').toUpperCase() %></td>
+                    <td>
+                      <span class="pill <%= video.source_type === 'youtube' ? 'pill-paid' : 'pill-free' %>">
+                        <%= (video.source_type || 'upload').toUpperCase() %>
+                      </span>
+                    </td>
+                    <td><span class="muted"><%= video.description || '-' %></span></td>
+                    <td>
+                      <span class="pill <%= video.access_type === 'paid' ? 'pill-paid' : 'pill-free' %>">
+                        <%= video.access_type.toUpperCase() %>
+                      </span>
+                    </td>
+                    <td>
+                      <a href="/admin/videos/<%= video.id %>/edit" class="btn-link">Edit</a>
+                      <form method="post" action="/admin/videos/<%= video.id %>/delete" class="inline-form">
+                        <button type="submit" class="danger">Delete</button>
+                      </form>
+                    </td>
+                  </tr>
+                <% }) %>
+              </tbody>
+            </table>
+          </div>
+        <% } %>
+      </section>
+
+      <section class="card">
+        <h2>Promo Codes</h2>
+        <form method="post" action="/admin/promos" class="form-grid module-form">
+          <label>Code</label>
+          <input type="text" name="code" placeholder="CMT10" required />
+
+          <label>Discount Type</label>
+          <select name="discount_type" required>
+            <option value="percent">Percent (%)</option>
+            <option value="fixed">Fixed Amount</option>
+          </select>
+
+          <label>Discount Value</label>
+          <input type="number" name="discount_value" step="0.01" min="0.01" required />
+
+          <label>Usage Limit (optional)</label>
+          <input type="number" name="usage_limit" min="1" />
+
+          <label>Expires At (optional)</label>
+          <input type="datetime-local" name="expires_at" />
+
+          <button type="submit">Create Promo Code</button>
+        </form>
+
+        <% if (!promoCodes.length) { %>
+          <p class="muted">No promo codes created yet.</p>
+        <% } else { %>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Code</th>
+                  <th>Type</th>
+                  <th>Value</th>
+                  <th>Usage</th>
+                  <th>Expires</th>
+                  <th>Status</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                <% promoCodes.forEach((promo) => { %>
+                  <tr>
+                    <td><strong><%= promo.code %></strong></td>
+                    <td><%= promo.discount_type %></td>
+                    <td><%= promo.discount_value %></td>
+                    <td><%= promo.used_count %> / <%= promo.usage_limit || 'Unlimited' %></td>
+                    <td><%= promo.expires_at || '-' %></td>
+                    <td><%= promo.is_active ? 'Active' : 'Inactive' %></td>
+                    <td>
+                      <form method="post" action="/admin/promos/<%= promo.id %>/toggle" class="inline-form">
+                        <button type="submit"><%= promo.is_active ? 'Disable' : 'Enable' %></button>
+                      </form>
+                    </td>
+                  </tr>
+                <% }) %>
+              </tbody>
+            </table>
+          </div>
+        <% } %>
+      </section>
+
+      <section class="card">
+        <h2>Payment Requests</h2>
+        <div class="topbar-actions section-actions">
+          <form method="get" action="/admin" class="inline-form">
+            <label class="inline-checkbox">
+              Status
+              <select name="payment_status">
+                <option value="all" <%= paymentStatus === 'all' ? 'selected' : '' %>>All</option>
+                <option value="pending" <%= paymentStatus === 'pending' ? 'selected' : '' %>>Pending</option>
+                <option value="approved" <%= paymentStatus === 'approved' ? 'selected' : '' %>>Approved</option>
+                <option value="rejected" <%= paymentStatus === 'rejected' ? 'selected' : '' %>>Rejected</option>
+              </select>
+            </label>
+            <button type="submit">Filter</button>
+          </form>
+          <a href="/admin/export/payments.csv?payment_status=<%= paymentStatus %>" class="btn-link">Export Payments CSV</a>
+        </div>
+        <% if (!payments.length) { %>
+          <p class="muted">No payment requests yet.</p>
+        <% } else { %>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Student</th>
+                  <th>Promo</th>
+                  <th>Discount</th>
+                  <th>Expected</th>
+                  <th>Amount</th>
+                  <th>Txn Ref</th>
+                  <th>Proof</th>
+                  <th>Status</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                <% payments.forEach((p) => { %>
+                  <tr>
+                    <td><%= p.user_name %><br /><span class="muted"><%= p.user_email %></span></td>
+                    <td><%= p.promo_code || '-' %></td>
+                    <td><%= Number(p.discount_amount || 0).toFixed(2) %></td>
+                    <td><%= Number(p.expected_amount || 0).toFixed(2) %></td>
+                    <td><%= p.amount %></td>
+                    <td><%= p.transaction_ref || '-' %></td>
+                    <td>
+                      <% if (p.screenshot_filename) { %>
+                        <a href="/payment-proof/<%= p.id %>" target="_blank" rel="noopener">View Proof</a>
+                      <% } else { %>
+                        <span class="muted">No file</span>
+                      <% } %>
+                    </td>
+                    <td>
+                      <span class="pill <%= p.status === 'approved' ? 'pill-free' : p.status === 'rejected' ? 'pill-danger' : 'pill-paid' %>">
+                        <%= p.status.toUpperCase() %>
+                      </span>
+                    </td>
+                    <td>
+                      <% if (p.status === 'pending') { %>
+                        <form method="post" action="/admin/payments/<%= p.id %>/approve" class="form-grid compact">
+                          <input type="text" name="admin_note" placeholder="Optional note" />
+                          <button type="submit">Approve + Grant Access</button>
+                        </form>
+                        <form method="post" action="/admin/payments/<%= p.id %>/reject" class="form-grid compact">
+                          <input type="text" name="admin_note" placeholder="Reason for reject" />
+                          <button type="submit" class="danger">Reject</button>
+                        </form>
+                      <% } else { %>
+                        <span class="muted"><%= p.admin_note || 'Reviewed' %></span>
+                      <% } %>
+                    </td>
+                  </tr>
+                <% }) %>
+              </tbody>
+            </table>
+          </div>
+        <% } %>
+      </section>
+
+      <section class="card">
+        <h2>User Activity Logs</h2>
+        <% if (!recentActivity.length) { %>
+          <p class="muted">No activity logs yet.</p>
+        <% } else { %>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Time</th>
+                  <th>User</th>
+                  <th>Event</th>
+                  <th>Data</th>
+                </tr>
+              </thead>
+              <tbody>
+                <% recentActivity.forEach((a) => { %>
+                  <tr>
+                    <td><%= a.created_at %></td>
+                    <td><%= a.user_name %><br /><span class="muted"><%= a.user_email %></span></td>
+                    <td><%= a.event_type %></td>
+                    <td><span class="muted"><%= a.event_data || '-' %></span></td>
+                  </tr>
+                <% }) %>
+              </tbody>
+            </table>
+          </div>
+        <% } %>
+      </section>
+
+      <section class="card">
+        <h2>Trial Leads</h2>
+        <% if (!leads.length) { %>
+          <p class="muted">No leads captured yet.</p>
+        <% } else { %>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Time</th>
+                  <th>Name</th>
+                  <th>Email</th>
+                  <th>Phone</th>
+                  <th>Topic</th>
+                </tr>
+              </thead>
+              <tbody>
+                <% leads.forEach((lead) => { %>
+                  <tr>
+                    <td><%= lead.created_at %></td>
+                    <td><%= lead.name %></td>
+                    <td><%= lead.email %></td>
+                    <td><%= lead.phone || '-' %></td>
+                    <td><%= lead.interest_topic || '-' %></td>
+                  </tr>
+                <% }) %>
+              </tbody>
+            </table>
+          </div>
+        <% } %>
+      </section>
+    </main>
+
+    <script>
+      (function () {
+        const btn = document.getElementById("selectAllStudents");
+        const checks = document.querySelectorAll(".bulk-student");
+        if (!btn || !checks.length) {
+          return;
+        }
+
+        let selected = false;
+        btn.addEventListener("click", function () {
+          selected = !selected;
+          checks.forEach(function (c) {
+            c.checked = selected;
+          });
+          btn.textContent = selected ? "Clear Selection" : "Select All";
+        });
+      })();
+    </script>
+  </body>
+</html>

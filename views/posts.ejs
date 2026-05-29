@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Posts | CMT Students</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <img src="/logo.svg" alt="Clap Money Trading" class="brand-logo" />
+        <div>
+          <h1 class="brand-title">Student Posts</h1>
+          <p class="brand-subtitle">Updates and announcements for your learning path</p>
+        </div>
+      </div>
+      <div class="topbar-actions">
+        <a href="/dashboard" class="btn-link">Dashboard</a>
+        <% if (currentUser.is_admin) { %>
+          <a href="/admin/posts" class="btn-link">Manage Posts</a>
+        <% } %>
+        <form method="post" action="/logout">
+          <button type="submit" class="danger">Logout</button>
+        </form>
+      </div>
+    </header>
+
+    <main class="container stack-gap">
+      <% if (!posts.length) { %>
+        <section class="card">
+          <h2>No posts yet</h2>
+          <p class="muted">Your announcements feed is empty right now.</p>
+        </section>
+      <% } else { %>
+        <% posts.forEach((post) => { %>
+          <article class="card post-card">
+            <div class="post-head">
+              <h2><%= post.title %></h2>
+              <span class="pill <%= post.access_type === 'paid' ? 'pill-paid' : 'pill-free' %>">
+                <%= post.access_type.toUpperCase() %>
+              </span>
+            </div>
+            <p class="muted">Posted on <%= post.created_at %></p>
+            <p class="post-body"><%= post.content %></p>
+          </article>
+        <% }) %>
+      <% } %>
+    </main>
+  </body>
+</html>

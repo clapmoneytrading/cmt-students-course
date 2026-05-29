@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Clap Money Trading | Learn Trading with Structure</title>
+    <meta name="description" content="Join Clap Money Trading to learn free and paid trading courses with practical lessons, roadmap, and support." />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <img src="/logo.svg" alt="Clap Money Trading" class="brand-logo" />
+        <div>
+          <h1 class="brand-title">Clap Money Trading</h1>
+          <p class="brand-subtitle">Structured learning for smart traders</p>
+        </div>
+      </div>
+      <div class="topbar-actions">
+        <a href="/login" class="btn-link">Student Login</a>
+        <a href="/register" class="btn-link">Join Now</a>
+      </div>
+    </header>
+
+    <main class="container landing-grid">
+      <section class="card landing-hero">
+        <h2>Trade with Process, Not Emotion</h2>
+        <p class="muted">Get free foundation lessons, unlock premium modules, track progress, and earn completion certificates.</p>
+        <div class="landing-cta">
+          <a href="/register" class="btn-link">Start Free</a>
+          <a href="#lead-form" class="btn-link ghost">Book Trial Call</a>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Results</h2>
+        <div class="stats-grid">
+          <article><h3>2,000+</h3><p class="muted">Learners trained</p></article>
+          <article><h3>85%</h3><p class="muted">Students finish core roadmap</p></article>
+          <article><h3>4.8/5</h3><p class="muted">Average learner rating</p></article>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Testimonials</h2>
+        <div class="testimonial-grid">
+          <blockquote>"Clear modules and practical examples. I finally have a trading process."<cite>- Arun, Intraday Student</cite></blockquote>
+          <blockquote>"Risk management lessons changed how I trade and preserve capital."<cite>- Sahana, Options Learner</cite></blockquote>
+          <blockquote>"The roadmap keeps me consistent from beginner to advanced."<cite>- Vivek, Swing Trader</cite></blockquote>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Free Course Topics</h2>
+        <div class="topic-grid">
+          <% freeTopics.forEach((topic) => { %>
+            <article class="topic-card">
+              <h3><%= topic.title %></h3>
+              <p class="muted"><%= topic.intro %></p>
+              <a href="/topics/<%= topic.slug %>" class="btn-link">Read Topic Page</a>
+            </article>
+          <% }) %>
+        </div>
+      </section>
+
+      <section class="card" id="lead-form">
+        <h2>Trial Class Lead Form</h2>
+        <% if (error) { %>
+          <div class="alert"><%= error %></div>
+        <% } %>
+        <% if (success) { %>
+          <div class="alert success"><%= success %></div>
+        <% } %>
+        <form method="post" action="/lead-capture" class="form-grid">
+          <label>Name</label>
+          <input type="text" name="name" required />
+
+          <label>Email</label>
+          <input type="email" name="email" required />
+
+          <label>Phone</label>
+          <input type="text" name="phone" />
+
+          <label>Interested Topic</label>
+          <input type="text" name="interest_topic" placeholder="Price Action / Options / Risk Management" />
+
+          <button type="submit">Submit Lead</button>
+        </form>
+      </section>
+
+      <section class="card faq">
+        <h2>FAQ</h2>
+        <details><summary>Do I get free content first?</summary><p>Yes. Every student starts with free modules.</p></details>
+        <details><summary>How do I unlock paid course?</summary><p>Pay using QR and submit proof, then admin approves access.</p></details>
+        <details><summary>Can I learn from mobile?</summary><p>Yes. Portal is mobile-friendly and works across devices.</p></details>
+      </section>
+    </main>
+
+    <a class="whatsapp-float" href="https://wa.me/<%= supportWhatsapp %>" target="_blank" rel="noopener" aria-label="WhatsApp Support">
+      WhatsApp Support
+    </a>
+  </body>
+</html>

@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Verify OTP | CMT Students</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="auth-wrap">
+      <section class="card">
+        <div class="auth-brand">
+          <img src="/logo.svg" alt="Clap Money Trading" class="brand-logo" />
+          <p class="brand-subtitle">Clap Money Trading</p>
+        </div>
+
+        <h1>Verify Email OTP</h1>
+        <p class="muted">Enter the 6-digit code sent to your email.</p>
+
+        <% if (freeGroupUrl) { %>
+          <div class="card" style="padding: 12px; margin-bottom: 12px">
+            <p class="muted" style="margin: 0 0 8px">Join our Free WhatsApp group after registration:</p>
+            <a class="btn-link" href="<%= freeGroupUrl %>" target="_blank" rel="noopener">Join Free WhatsApp Group</a>
+          </div>
+        <% } %>
+
+        <% if (message === 'otp_sent') { %>
+          <div class="alert success">A new OTP has been sent to your email.</div>
+        <% } %>
+        <% if (error) { %>
+          <div class="alert"><%= error %></div>
+        <% } %>
+
+        <form method="post" action="/verify-otp" class="form-grid">
+          <label>Email</label>
+          <input type="email" name="email" value="<%= email || '' %>" required />
+
+          <label>OTP Code</label>
+          <input type="text" name="otp_code" minlength="6" maxlength="6" pattern="[0-9]{6}" required />
+
+          <button type="submit">Verify Account</button>
+        </form>
+
+        <form method="post" action="/verify-otp/resend" class="form-grid otp-resend">
+          <input type="hidden" name="email" value="<%= email || '' %>" />
+          <button type="submit">Resend OTP</button>
+        </form>
+
+        <p class="helper"><a href="/login">Back to Login</a></p>
+      </section>
+    </main>
+  </body>
+</html>

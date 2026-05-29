@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Upload Video | CMT Students</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <img src="/logo.svg" alt="Clap Money Trading" class="brand-logo" />
+        <div>
+          <h1 class="brand-title">Upload Course Video</h1>
+          <p class="brand-subtitle">Add lessons to free or paid modules</p>
+        </div>
+      </div>
+      <div class="topbar-actions">
+        <a href="/admin" class="btn-link">Back to Admin</a>
+      </div>
+    </header>
+
+    <main class="container">
+      <section class="card">
+        <% if (error) { %>
+          <div class="alert"><%= error %></div>
+        <% } %>
+
+        <div id="uploadError" class="alert" style="display: none"></div>
+
+        <form id="uploadForm" method="post" action="/admin/videos/upload" enctype="multipart/form-data" class="form-grid">
+          <label>Video Title</label>
+          <input type="text" name="title" required />
+
+          <label>Description</label>
+          <textarea name="description" rows="4"></textarea>
+
+          <label>Topic</label>
+          <input type="text" name="topic" placeholder="Price Action / Risk Management / Options" />
+
+          <label>Level</label>
+          <select name="level" required>
+            <option value="beginner">Beginner</option>
+            <option value="intermediate">Intermediate</option>
+            <option value="advanced">Advanced</option>
+          </select>
+
+          <label>Access Type</label>
+          <select name="access_type" required>
+            <option value="free">Free Course</option>
+            <option value="paid">Paid Course</option>
+          </select>
+
+          <label>Module</label>
+          <select name="module_id">
+            <option value="">General Lessons (No Module)</option>
+            <% modules.forEach((module) => { %>
+              <option value="<%= module.id %>"><%= module.title %> (<%= module.access_type.toUpperCase() %>)</option>
+            <% }) %>
+          </select>
+
+          <label>Lesson Order</label>
+          <input type="number" name="lesson_order" min="0" value="0" />
+
+          <label>Video Source</label>
+          <select name="source_type" id="sourceType" required>
+            <option value="upload">Upload File</option>
+            <option value="youtube">YouTube Link</option>
+          </select>
+
+          <div id="uploadSourceFields" class="form-grid">
+            <label>Video File</label>
+            <input id="videoFileInput" type="file" name="video" accept="video/*" required />
+          </div>
+
+          <div id="youtubeSourceFields" class="form-grid" style="display: none">
+            <label>YouTube Video URL</label>
+            <input id="youtubeUrlInput" type="url" name="youtube_url" placeholder="https://www.youtube.com/watch?v=xxxxxxxxxxx" />
+            <p class="muted helper">Use Unlisted visibility for privacy. Fully private YouTube videos may not play for students.</p>
+          </div>
+
+          <div id="progressWrap" class="upload-progress" style="display: none">
+            <div class="progress-track">
+              <div id="progressBar" class="progress-fill"></div>
+            </div>
+            <p id="progressText" class="muted">Uploading: 0%</p>
+          </div>
+
+          <button id="uploadBtn" type="submit">Upload Video</button>
+        </form>
+      </section>
+    </main>
+
+    <script>
+      (function () {
+        const form = document.getElementById("uploadForm");
+        const progressWrap = document.getElementById("progressWrap");
+        const progressBar = document.getElementById("progressBar");
+        const progressText = document.getElementById("progressText");
+        const uploadError = document.getElementById("uploadError");
+        const uploadBtn = document.getElementById("uploadBtn");
+        const sourceType = document.getElementById("sourceType");
+        const uploadSourceFields = document.getElementById("uploadSourceFields");
+        const youtubeSourceFields = document.getElementById("youtubeSourceFields");
+        const videoFileInput = document.getElementById("videoFileInput");
+        const youtubeUrlInput = document.getElementById("youtubeUrlInput");
+
+        function syncSourceFields() {
+          const isYoutube = sourceType && sourceType.value === "youtube";
+          uploadSourceFields.style.display = isYoutube ? "none" : "grid";
+          youtubeSourceFields.style.display = isYoutube ? "grid" : "none";
+          videoFileInput.required = !isYoutube;
+          youtubeUrlInput.required = isYoutube;
+        }
+
+        if (sourceType) {
+          sourceType.addEventListener("change", syncSourceFields);
+          syncSourceFields();
+        }
+
+        form.addEventListener("submit", function (event) {
+          event.preventDefault();
+          uploadError.style.display = "none";
+          uploadError.textContent = "";
+
+          const xhr = new XMLHttpRequest();
+          xhr.open("POST", form.action);
+          xhr.setRequestHeader("X-Requested-With", "XMLHttpRequest");
+
+          const useYoutube = sourceType && sourceType.value === "youtube";
+          progressWrap.style.display = useYoutube ? "none" : "block";
+          uploadBtn.disabled = true;
+          uploadBtn.textContent = useYoutube ? "Saving..." : "Uploading...";
+
+          xhr.upload.addEventListener("progress", function (e) {
+            if (!e.lengthComputable) {
+              return;
+            }
+
+            const percent = Math.round((e.loaded / e.total) * 100);
+            progressBar.style.width = percent + "%";
+            progressText.textContent = "Uploading: " + percent + "%";
+          });
+
+          xhr.addEventListener("load", function () {
+            uploadBtn.disabled = false;
+            uploadBtn.textContent = "Upload Video";
+
+            if (xhr.status >= 200 && xhr.status < 300) {
+              let payload = {};
+              try {
+                payload = JSON.parse(xhr.responseText || "{}");
+              } catch (_) {
+                payload = {};
+              }
+
+              window.location.href = payload.redirect || "/admin";
+              return;
+            }
+
+            let message = "Upload failed. Please try again.";
+            try {
+              const payload = JSON.parse(xhr.responseText || "{}");
+              if (payload.error) {
+                message = payload.error;
+              }
+            } catch (_) {
+              // Ignore parse errors and show generic fallback message.
+            }
+
+            uploadError.style.display = "block";
+            uploadError.textContent = message;
+          });
+
+          xhr.addEventListener("error", function () {
+            uploadBtn.disabled = false;
+            uploadBtn.textContent = "Upload Video";
+            uploadError.style.display = "block";
+            uploadError.textContent = "Network error during upload. Please try again.";
+          });
+
+          xhr.send(new FormData(form));
+        });
+      })();
+    </script>
+  </body>
+</html>
