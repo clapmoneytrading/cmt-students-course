@@ -51,7 +51,10 @@ const FREE_TOPICS = [
 ];
 
 const rootDir = __dirname;
-const dbPath = path.join(rootDir, "database.sqlite");
+const dbPath = process.env.DB_PATH
+  ? path.resolve(process.env.DB_PATH)
+  : path.join(rootDir, "database.sqlite");
+fs.mkdirSync(path.dirname(dbPath), { recursive: true });
 const uploadDir = path.join(rootDir, "uploads", "videos");
 const paymentProofDir = path.join(rootDir, "uploads", "payments");
 
@@ -59,6 +62,8 @@ fs.mkdirSync(uploadDir, { recursive: true });
 fs.mkdirSync(paymentProofDir, { recursive: true });
 
 const db = new Database(dbPath);
+db.pragma("journal_mode = WAL");
+db.pragma("busy_timeout = 5000");
 
 function initDatabase() {
   db.exec(`
@@ -1981,25 +1986,6 @@ app.post("/admin/modules", requireAdmin, (req, res) => {
     sortOrder
   );
 
-
-  if (sourceType === "upload" && existing.source_type === "youtube") {
-    return res.status(400).render("edit-video", {
-      error: "YouTube lessons cannot be switched to upload here. Create a new uploaded lesson instead.",
-      video: {
-        id: videoId,
-        title,
-        description,
-        topic,
-        level,
-        source_type: existing.source_type,
-        youtube_url: existing.youtube_url || "",
-        access_type: accessType,
-        module_id: moduleId,
-        lesson_order: lessonOrder
-      },
-      modules: getModules()
-    });
-  }
   res.redirect("/admin");
 });
 
