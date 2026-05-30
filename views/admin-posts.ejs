@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Admin Posts | CMT Students</title>
+    <title>Admin Announcements | CMT Students</title>
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="/styles.css" />
   </head>
@@ -12,14 +12,15 @@
       <div class="brand">
         <img src="/logo.svg" alt="Clap Money Trading" class="brand-logo" />
         <div>
-          <h1 class="brand-title">Post Management</h1>
+          <h1 class="brand-title">Announcement Management</h1>
           <p class="brand-subtitle">Publish updates for free and paid students</p>
         </div>
       </div>
       <div class="topbar-actions">
         <a href="/admin" class="btn-link">Admin Home</a>
         <a href="/admin/reports" class="btn-link">Reports</a>
-        <a href="/posts" class="btn-link">Student View</a>
+        <a href="/admin/help" class="btn-link">Help Requests</a>
+        <a href="/announcements" class="btn-link">Student View</a>
         <form method="post" action="/logout">
           <button type="submit" class="danger">Logout</button>
         </form>
@@ -28,7 +29,7 @@
 
     <main class="container admin-grid">
       <section class="card">
-        <h2>Create Post</h2>
+        <h2>Create Announcement</h2>
         <% if (error) { %>
           <p class="error"><%= error %></p>
         <% } %>
@@ -45,14 +46,14 @@
           <label>Content</label>
           <textarea name="content" rows="7" required></textarea>
 
-          <button type="submit">Publish Post</button>
+          <button type="submit">Publish Announcement</button>
         </form>
       </section>
 
       <section class="card">
-        <h2>Published Posts</h2>
+        <h2>Published Announcements</h2>
         <% if (!posts.length) { %>
-          <p class="muted">No posts published yet.</p>
+          <p class="muted">No announcements published yet.</p>
         <% } else { %>
           <div class="table-wrap">
             <table>

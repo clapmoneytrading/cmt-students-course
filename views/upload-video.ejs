@@ -67,6 +67,7 @@
           <select name="source_type" id="sourceType" required>
             <option value="upload">Upload File</option>
             <option value="youtube">YouTube Link</option>
+            <option value="external">External Video URL</option>
           </select>
 
           <div id="uploadSourceFields" class="form-grid">
@@ -78,6 +79,12 @@
             <label>YouTube Video URL</label>
             <input id="youtubeUrlInput" type="url" name="youtube_url" placeholder="https://www.youtube.com/watch?v=xxxxxxxxxxx" />
             <p class="muted helper">Use Unlisted visibility for privacy. Fully private YouTube videos may not play for students.</p>
+          </div>
+
+          <div id="externalSourceFields" class="form-grid" style="display: none">
+            <label>External Video URL</label>
+            <input id="externalUrlInput" type="url" name="external_url" placeholder="https://cdn.yoursite.com/videos/lesson1.mp4" />
+            <p class="muted helper">Use a direct playable video URL from Hostinger or cloud storage.</p>
           </div>
 
           <div id="progressWrap" class="upload-progress" style="display: none">
@@ -103,15 +110,22 @@
         const sourceType = document.getElementById("sourceType");
         const uploadSourceFields = document.getElementById("uploadSourceFields");
         const youtubeSourceFields = document.getElementById("youtubeSourceFields");
+        const externalSourceFields = document.getElementById("externalSourceFields");
         const videoFileInput = document.getElementById("videoFileInput");
         const youtubeUrlInput = document.getElementById("youtubeUrlInput");
+        const externalUrlInput = document.getElementById("externalUrlInput");
 
         function syncSourceFields() {
-          const isYoutube = sourceType && sourceType.value === "youtube";
-          uploadSourceFields.style.display = isYoutube ? "none" : "grid";
+          const mode = sourceType ? sourceType.value : "upload";
+          const isYoutube = mode === "youtube";
+          const isExternal = mode === "external";
+          const isUpload = mode === "upload";
+          uploadSourceFields.style.display = isUpload ? "grid" : "none";
           youtubeSourceFields.style.display = isYoutube ? "grid" : "none";
-          videoFileInput.required = !isYoutube;
+          externalSourceFields.style.display = isExternal ? "grid" : "none";
+          videoFileInput.required = isUpload;
           youtubeUrlInput.required = isYoutube;
+          externalUrlInput.required = isExternal;
         }
 
         if (sourceType) {

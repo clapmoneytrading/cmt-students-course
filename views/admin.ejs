@@ -19,7 +19,8 @@
       <div class="topbar-actions">
         <a href="/dashboard" class="btn-link">Student Dashboard</a>
         <a href="/admin/reports" class="btn-link">Progress Reports</a>
-        <a href="/admin/posts" class="btn-link">Manage Posts</a>
+        <a href="/admin/posts" class="btn-link">Announcements</a>
+        <a href="/admin/help" class="btn-link">Help Requests</a>
         <a href="/admin/videos/upload" class="btn-link">Upload Video</a>
         <form method="post" action="/logout">
           <button type="submit" class="danger">Logout</button>
@@ -46,11 +47,15 @@
           <p><%= summary.pending_payments %></p>
         </article>
         <article class="stat-card">
-          <h3>Total Posts</h3>
+          <h3>Total Announcements</h3>
           <p><%= postSummary.total_posts %></p>
         </article>
         <article class="stat-card">
-          <h3>Paid Posts</h3>
+          <h3>Open Help Requests</h3>
+          <p><%= summary.open_help_requests %></p>
+        </article>
+        <article class="stat-card">
+          <h3>Paid Announcements</h3>
           <p><%= postSummary.paid_posts %></p>
         </article>
       </section>

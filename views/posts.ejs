@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Posts | CMT Students</title>
+    <title>Announcements | CMT Students</title>
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="/styles.css" />
   </head>
@@ -12,14 +12,16 @@
       <div class="brand">
         <img src="/logo.svg" alt="Clap Money Trading" class="brand-logo" />
         <div>
-          <h1 class="brand-title">Student Posts</h1>
-          <p class="brand-subtitle">Updates and announcements for your learning path</p>
+          <h1 class="brand-title">Announcements</h1>
+          <p class="brand-subtitle">Updates from admin and student help desk</p>
         </div>
       </div>
       <div class="topbar-actions">
         <a href="/dashboard" class="btn-link">Dashboard</a>
+        <a href="/help" class="btn-link">Help</a>
         <% if (currentUser.is_admin) { %>
-          <a href="/admin/posts" class="btn-link">Manage Posts</a>
+          <a href="/admin/posts" class="btn-link">Manage Announcements</a>
+          <a href="/admin/help" class="btn-link">Help Requests</a>
         <% } %>
         <form method="post" action="/logout">
           <button type="submit" class="danger">Logout</button>
@@ -30,8 +32,8 @@
     <main class="container stack-gap">
       <% if (!posts.length) { %>
         <section class="card">
-          <h2>No posts yet</h2>
-          <p class="muted">Your announcements feed is empty right now.</p>
+          <h2>No announcements yet</h2>
+          <p class="muted">Your announcement feed is empty right now.</p>
         </section>
       <% } else { %>
         <% posts.forEach((post) => { %>

@@ -17,7 +17,8 @@
         </div>
       </div>
       <div class="topbar-actions">
-        <a href="/posts" class="btn-link">Posts</a>
+        <a href="/announcements" class="btn-link">Announcement</a>
+        <a href="/help" class="btn-link">Help</a>
         <% if (currentUser.is_admin) { %>
           <a href="/admin" class="btn-link">Admin Panel</a>
         <% } %>
@@ -147,87 +148,63 @@
         <% if (!modules.length) { %>
           <p class="muted">No modules available yet. Ask admin to add course content.</p>
         <% } else { %>
-          <div class="module-grid">
-            <% modules.forEach((module) => { %>
-              <article class="module-card <%= module.locked ? 'module-locked' : '' %>">
-                <div class="module-head">
-                  <h3><%= module.title %></h3>
-                  <span class="pill <%= module.access_type === 'paid' ? 'pill-paid' : 'pill-free' %>">
-                    <%= module.access_type.toUpperCase() %>
-                  </span>
-                </div>
-                <p class="muted"><%= module.description || 'No description' %></p>
-
-                <% if (module.locked) { %>
-                  <p class="locked-note">This module is locked. Upgrade to paid access.</p>
-                <% } else if (!module.lessons.length) { %>
-                  <p class="muted">No lessons in this module yet.</p>
-                <% } else { %>
-                  <div class="video-grid">
-                    <% module.lessons.forEach((video) => {
-                         const p = progressByVideo[video.id] || { progress_seconds: 0, duration_seconds: 0, completed: false };
-                         const isFav = favoriteVideoIds.includes(video.id);
-                    %>
-                      <article
-                        class="video-card lesson-card"
-                        id="lesson-<%= video.id %>"
-                        data-title="<%= video.title.toLowerCase() %>"
-                        data-topic="<%= (video.topic || '').toLowerCase() %>"
-                        data-level="<%= (video.level || 'beginner').toLowerCase() %>"
-                      >
-                        <div class="lesson-head">
-                          <h4 class="thumb-title"><%= video.title %></h4>
-                          <button type="button" class="favorite-btn <%= isFav ? 'favorited' : '' %>" data-favorite-video-id="<%= video.id %>">
-                            <%= isFav ? '★ Favorite' : '☆ Favorite' %>
-                          </button>
-                        </div>
-                        <p class="muted"><%= video.description || "No description" %></p>
-                        <p class="muted"><%= video.topic || 'General Topic' %> | <%= (video.level || 'beginner').toUpperCase() %></p>
-                        <p class="pill <%= video.access_type === 'paid' ? 'pill-paid' : 'pill-free' %>">
-                          <%= video.access_type.toUpperCase() %>
-                        </p>
-                        <p class="muted progress-label" data-progress-label="<%= video.id %>">
-                          <%= p.completed ? 'Completed' : 'Progress saved' %>
-                        </p>
-                        <div class="lesson-media-wrap">
-                        <% if (video.source_type === 'youtube' && video.youtube_url) { %>
-                          <iframe
-                            class="lesson-embed"
-                            src="<%= video.youtube_url %>"
-                            title="<%= video.title %>"
-                            loading="lazy"
-                            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-                            referrerpolicy="strict-origin-when-cross-origin"
-                            allowfullscreen
-                          ></iframe>
-                          <p class="muted">Hosted on YouTube (private access managed in this portal).</p>
-                        <% } else { %>
-                          <video
-                            controls
-                            preload="metadata"
-                            src="/video/<%= video.id %>"
-                            data-video-id="<%= video.id %>"
-                            data-start-seconds="<%= p.progress_seconds || 0 %>"
-                            controlslist="nodownload noplaybackrate noremoteplayback"
-                            disablepictureinpicture
-                          ></video>
-                        <% } %>
-                          <div class="lesson-watermark" data-watermark data-student-email="<%= currentUser.email %>"></div>
-                        </div>
-                        <button
-                          type="button"
-                          class="mark-complete-btn"
-                          data-complete-video-id="<%= video.id %>"
-                          <%= p.completed ? 'disabled' : '' %>
-                        >
-                          <%= p.completed ? 'Completed' : 'Mark as Complete' %>
-                        </button>
-                      </article>
-                    <% }) %>
+          <div class="course-shell">
+            <div class="course-tree">
+              <% modules.forEach((module) => { %>
+                <article class="module-card <%= module.locked ? 'module-locked' : '' %>">
+                  <div class="module-head">
+                    <h3><%= module.title %></h3>
+                    <div class="module-head-actions">
+                      <span class="pill <%= module.access_type === 'paid' ? 'pill-paid' : 'pill-free' %>"><%= module.access_type.toUpperCase() %></span>
+                      <% if (!module.locked && module.lessons.length) { %>
+                        <button type="button" class="module-toggle" data-module-toggle aria-expanded="true">Collapse</button>
+                      <% } %>
+                    </div>
                   </div>
-                <% } %>
-              </article>
-            <% }) %>
+                  <% if (module.locked) { %>
+                    <p class="locked-note">This module is locked. Upgrade to paid access.</p>
+                  <% } else if (!module.lessons.length) { %>
+                    <p class="muted">No lessons in this module yet.</p>
+                  <% } else { %>
+                    <ul class="topic-list">
+                      <% module.lessons.forEach((video) => {
+                           const p = progressByVideo[video.id] || { progress_seconds: 0, duration_seconds: 0, completed: false };
+                      %>
+                        <li id="lesson-<%= video.id %>">
+                          <button
+                            type="button"
+                            class="topic-item"
+                            data-video-id="<%= video.id %>"
+                            data-title="<%= video.title %>"
+                            data-description="<%= video.description || '' %>"
+                            data-topic="<%= video.topic || 'General Topic' %>"
+                            data-level="<%= (video.level || 'beginner').toLowerCase() %>"
+                            data-access="<%= video.access_type %>"
+                            data-source-type="<%= video.source_type %>"
+                            data-youtube-url="<%= video.youtube_url || '' %>"
+                            data-video-src="/video/<%= video.id %>"
+                            data-start-seconds="<%= p.progress_seconds || 0 %>"
+                            data-completed="<%= p.completed ? '1' : '0' %>"
+                          >
+                            <span class="topic-title"><%= video.title %></span>
+                            <span class="topic-meta"><%= video.topic || 'General Topic' %> | <%= (video.level || 'beginner').toUpperCase() %></span>
+                            <span class="topic-progress" data-progress-label="<%= video.id %>"><%= p.completed ? 'Completed' : 'Progress saved' %></span>
+                          </button>
+                        </li>
+                      <% }) %>
+                    </ul>
+                  <% } %>
+                </article>
+              <% }) %>
+            </div>
+
+            <div class="course-player-panel">
+              <h3 id="activeLessonTitle">Select a topic to start</h3>
+              <p id="activeLessonMeta" class="muted">Choose any topic from the left module list.</p>
+              <p id="activeLessonDesc" class="muted"></p>
+              <div id="lessonPlayerHost" class="lesson-media-wrap lesson-player-host"></div>
+              <button id="panelCompleteBtn" type="button" class="mark-complete-btn" style="display:none;">Mark as Complete</button>
+            </div>
           </div>
         <% } %>
       </section>
@@ -235,129 +212,56 @@
 
     <script>
       (function () {
-        const players = document.querySelectorAll("video[data-video-id]");
         const searchInput = document.getElementById("lessonSearch");
         const topicFilter = document.getElementById("topicFilter");
         const levelFilter = document.getElementById("levelFilter");
-        const lessonCards = document.querySelectorAll(".lesson-card");
-        const favoriteButtons = document.querySelectorAll("[data-favorite-video-id]");
-        const completeButtons = document.querySelectorAll("[data-complete-video-id]");
+        const topicItems = document.querySelectorAll(".topic-item");
+        const moduleToggles = document.querySelectorAll("[data-module-toggle]");
+        const lessonTitleEl = document.getElementById("activeLessonTitle");
+        const lessonMetaEl = document.getElementById("activeLessonMeta");
+        const lessonDescEl = document.getElementById("activeLessonDesc");
+        const lessonPlayerHost = document.getElementById("lessonPlayerHost");
+        const panelCompleteBtn = document.getElementById("panelCompleteBtn");
         const shareCertBtn = document.getElementById("shareCertBtn");
         const shareCertMsg = document.getElementById("shareCertMsg");
-        const embeds = document.querySelectorAll(".lesson-embed");
-        const watermarks = document.querySelectorAll("[data-watermark]");
-
-        function formatWatermarkTime() {
-          const now = new Date();
-          return now.toLocaleString();
-        }
-
-        function setWatermarkText() {
-          watermarks.forEach(function (wm) {
-            const email = wm.getAttribute("data-student-email") || "student";
-            wm.textContent = email + " | " + formatWatermarkTime();
-          });
-        }
-
-        function moveWatermarks() {
-          watermarks.forEach(function (wm) {
-            const left = 8 + Math.round(Math.random() * 55);
-            const top = 8 + Math.round(Math.random() * 70);
-            wm.style.left = left + "%";
-            wm.style.top = top + "%";
-          });
-        }
-
-        setWatermarkText();
-        moveWatermarks();
-        setInterval(function () {
-          setWatermarkText();
-          moveWatermarks();
-        }, 15000);
+        let currentVideoEl = null;
 
         function applyFilters() {
           const q = (searchInput && searchInput.value ? searchInput.value : "").trim().toLowerCase();
           const topic = (topicFilter && topicFilter.value ? topicFilter.value : "").trim().toLowerCase();
           const level = (levelFilter && levelFilter.value ? levelFilter.value : "").trim().toLowerCase();
 
-          lessonCards.forEach(function (card) {
-            const title = card.getAttribute("data-title") || "";
-            const cardTopic = card.getAttribute("data-topic") || "";
-            const cardLevel = card.getAttribute("data-level") || "";
+          topicItems.forEach(function (btn) {
+            const title = (btn.getAttribute("data-title") || "").toLowerCase();
+            const itemTopic = (btn.getAttribute("data-topic") || "").toLowerCase();
+            const itemLevel = (btn.getAttribute("data-level") || "").toLowerCase();
+            const li = btn.closest("li");
 
-            const passSearch = !q || title.indexOf(q) >= 0 || cardTopic.indexOf(q) >= 0;
-            const passTopic = !topic || cardTopic === topic;
-            const passLevel = !level || cardLevel === level;
+            const passSearch = !q || title.indexOf(q) >= 0 || itemTopic.indexOf(q) >= 0;
+            const passTopic = !topic || itemTopic === topic;
+            const passLevel = !level || itemLevel === level;
 
-            card.style.display = passSearch && passTopic && passLevel ? "block" : "none";
+            if (li) {
+              li.style.display = passSearch && passTopic && passLevel ? "list-item" : "none";
+            }
           });
         }
 
-        if (searchInput) {
-          searchInput.addEventListener("input", applyFilters);
-        }
-        if (topicFilter) {
-          topicFilter.addEventListener("change", applyFilters);
-        }
-        if (levelFilter) {
-          levelFilter.addEventListener("change", applyFilters);
-        }
-
-        favoriteButtons.forEach(function (button) {
-          button.addEventListener("click", function () {
-            const videoId = button.getAttribute("data-favorite-video-id");
-            fetch("/api/favorites/" + videoId, { method: "POST" })
-              .then(function (r) {
-                return r.json();
-              })
-              .then(function (payload) {
-                if (!payload || !payload.ok) {
-                  return;
-                }
-
-                if (payload.favorited) {
-                  button.classList.add("favorited");
-                  button.textContent = "★ Favorite";
-                } else {
-                  button.classList.remove("favorited");
-                  button.textContent = "☆ Favorite";
-                }
-              })
-              .catch(function () {
-                // Ignore silent favorite failures.
-              });
-          });
-        });
-
-        if (shareCertBtn && shareCertMsg) {
-          shareCertBtn.addEventListener("click", function () {
-            fetch("/certificate/share")
-              .then(function (r) {
-                return r.json();
-              })
-              .then(function (payload) {
-                if (!payload || !payload.url) {
-                  shareCertMsg.textContent = "Unable to create share link.";
-                  return;
-                }
-
-                if (navigator.clipboard && navigator.clipboard.writeText) {
-                  navigator.clipboard.writeText(payload.url).then(function () {
-                    shareCertMsg.textContent = "Share link copied.";
-                  });
-                  return;
-                }
-
-                shareCertMsg.textContent = payload.url;
-              })
-              .catch(function () {
-                shareCertMsg.textContent = "Unable to create share link.";
-              });
-          });
+        function setWatermark(wmEl) {
+          if (!wmEl) {
+            return;
+          }
+          wmEl.textContent = "<%= currentUser.email %> | " + new Date().toLocaleString();
+          wmEl.style.left = (8 + Math.round(Math.random() * 55)) + "%";
+          wmEl.style.top = (8 + Math.round(Math.random() * 70)) + "%";
         }
 
         function postProgress(videoEl, completedFlag) {
           const videoId = videoEl.getAttribute("data-video-id");
+          if (!videoId) {
+            return;
+          }
+
           const params = new URLSearchParams();
           params.set("progress_seconds", String(videoEl.currentTime || 0));
           params.set("duration_seconds", String(videoEl.duration || 0));
@@ -365,13 +269,9 @@
 
           fetch("/api/progress/" + videoId, {
             method: "POST",
-            headers: {
-              "Content-Type": "application/x-www-form-urlencoded"
-            },
+            headers: { "Content-Type": "application/x-www-form-urlencoded" },
             body: params.toString()
-          }).catch(function () {
-            // Ignore occasional network hiccups and continue playback.
-          });
+          }).catch(function () {});
 
           const label = document.querySelector('[data-progress-label="' + videoId + '"]');
           if (label) {
@@ -392,52 +292,40 @@
 
           fetch("/api/progress/" + videoId, {
             method: "POST",
-            headers: {
-              "Content-Type": "application/x-www-form-urlencoded"
-            },
+            headers: { "Content-Type": "application/x-www-form-urlencoded" },
             body: params.toString()
           })
-            .then(function (r) {
-              return r.json();
-            })
+            .then(function (r) { return r.json(); })
             .then(function (payload) {
               if (!payload || !payload.ok) {
                 return;
               }
-
               const label = document.querySelector('[data-progress-label="' + videoId + '"]');
               if (label) {
                 label.textContent = "Completed";
               }
-
+              const item = document.querySelector('.topic-item[data-video-id="' + videoId + '"]');
+              if (item) {
+                item.setAttribute("data-completed", "1");
+              }
               if (buttonEl) {
                 buttonEl.disabled = true;
                 buttonEl.textContent = "Completed";
               }
             })
-            .catch(function () {
-              // Ignore occasional network hiccups.
-            });
+            .catch(function () {});
         }
 
-        completeButtons.forEach(function (button) {
-          button.addEventListener("click", function () {
-            const videoId = button.getAttribute("data-complete-video-id");
-            if (!videoId || button.disabled) {
-              return;
-            }
-            markLessonComplete(videoId, button);
-          });
-        });
-
-        players.forEach(function (videoEl) {
+        function attachVideoTracking(videoEl) {
           let lastSentAt = 0;
           const resumeAt = Number(videoEl.getAttribute("data-start-seconds") || 0);
+          const wmEl = lessonPlayerHost.querySelector("[data-watermark]");
 
           videoEl.addEventListener("loadedmetadata", function () {
             if (resumeAt > 0 && resumeAt < videoEl.duration - 2) {
               videoEl.currentTime = resumeAt;
             }
+            setWatermark(wmEl);
           });
 
           videoEl.addEventListener("timeupdate", function () {
@@ -445,31 +333,125 @@
             if (now - lastSentAt > 10000) {
               lastSentAt = now;
               postProgress(videoEl, false);
+              setWatermark(wmEl);
             }
           });
 
-          videoEl.addEventListener("pause", function () {
-            postProgress(videoEl, false);
-          });
+          videoEl.addEventListener("pause", function () { postProgress(videoEl, false); });
+          videoEl.addEventListener("ended", function () { postProgress(videoEl, true); });
+          videoEl.addEventListener("contextmenu", function (e) { e.preventDefault(); });
+          videoEl.addEventListener("dragstart", function (e) { e.preventDefault(); });
+        }
 
-          videoEl.addEventListener("ended", function () {
-            postProgress(videoEl, true);
-          });
+        function selectTopic(button) {
+          topicItems.forEach(function (btn) { btn.classList.remove("active-topic"); });
+          button.classList.add("active-topic");
 
-          videoEl.addEventListener("contextmenu", function (event) {
-            event.preventDefault();
-          });
+          const videoId = button.getAttribute("data-video-id");
+          const title = button.getAttribute("data-title") || "Lesson";
+          const description = button.getAttribute("data-description") || "";
+          const topic = button.getAttribute("data-topic") || "General Topic";
+          const level = (button.getAttribute("data-level") || "beginner").toUpperCase();
+          const sourceType = button.getAttribute("data-source-type") || "upload";
+          const youtubeUrl = button.getAttribute("data-youtube-url") || "";
+          const videoSrc = button.getAttribute("data-video-src") || "";
+          const startSeconds = button.getAttribute("data-start-seconds") || "0";
+          const completed = button.getAttribute("data-completed") === "1";
 
-          videoEl.addEventListener("dragstart", function (event) {
-            event.preventDefault();
+          lessonTitleEl.textContent = title;
+          lessonMetaEl.textContent = topic + " | " + level;
+          lessonDescEl.textContent = description;
+          lessonPlayerHost.innerHTML = "";
+          currentVideoEl = null;
+
+          if (sourceType === "youtube" && youtubeUrl) {
+            lessonPlayerHost.innerHTML =
+              '<iframe class="lesson-embed" src="' + youtubeUrl + '" title="' + title + '" loading="lazy" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>' +
+              '<p class="muted">Hosted on YouTube.</p>';
+          } else {
+            lessonPlayerHost.innerHTML =
+              '<video controls preload="metadata" src="' + videoSrc + '" data-video-id="' + videoId + '" data-start-seconds="' + startSeconds + '" controlslist="nodownload noplaybackrate noremoteplayback" disablepictureinpicture></video>' +
+              '<div class="lesson-watermark" data-watermark></div>';
+            currentVideoEl = lessonPlayerHost.querySelector("video[data-video-id]");
+            if (currentVideoEl) {
+              attachVideoTracking(currentVideoEl);
+            }
+          }
+
+          panelCompleteBtn.style.display = "inline-flex";
+          panelCompleteBtn.setAttribute("data-video-id", videoId);
+          panelCompleteBtn.disabled = completed;
+          panelCompleteBtn.textContent = completed ? "Completed" : "Mark as Complete";
+        }
+
+        if (searchInput) {
+          searchInput.addEventListener("input", applyFilters);
+        }
+        if (topicFilter) {
+          topicFilter.addEventListener("change", applyFilters);
+        }
+        if (levelFilter) {
+          levelFilter.addEventListener("change", applyFilters);
+        }
+
+        topicItems.forEach(function (button) {
+          button.addEventListener("click", function () {
+            selectTopic(button);
           });
         });
 
-        embeds.forEach(function (embed) {
-          embed.addEventListener("contextmenu", function (event) {
-            event.preventDefault();
+        moduleToggles.forEach(function (toggleBtn) {
+          toggleBtn.addEventListener("click", function () {
+            const moduleCard = toggleBtn.closest(".module-card");
+            if (!moduleCard) {
+              return;
+            }
+
+            const isCollapsed = moduleCard.classList.toggle("module-collapsed");
+            toggleBtn.textContent = isCollapsed ? "Expand" : "Collapse";
+            toggleBtn.setAttribute("aria-expanded", isCollapsed ? "false" : "true");
           });
         });
+
+        if (panelCompleteBtn) {
+          panelCompleteBtn.addEventListener("click", function () {
+            const videoId = panelCompleteBtn.getAttribute("data-video-id");
+            if (!videoId || panelCompleteBtn.disabled) {
+              return;
+            }
+            markLessonComplete(videoId, panelCompleteBtn);
+          });
+        }
+
+        if (shareCertBtn && shareCertMsg) {
+          shareCertBtn.addEventListener("click", function () {
+            fetch("/certificate/share")
+              .then(function (r) { return r.json(); })
+              .then(function (payload) {
+                if (!payload || !payload.url) {
+                  shareCertMsg.textContent = "Unable to create share link.";
+                  return;
+                }
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                  navigator.clipboard.writeText(payload.url).then(function () {
+                    shareCertMsg.textContent = "Share link copied.";
+                  });
+                  return;
+                }
+                shareCertMsg.textContent = payload.url;
+              })
+              .catch(function () { shareCertMsg.textContent = "Unable to create share link."; });
+          });
+        }
+
+        applyFilters();
+        const firstVisible = Array.from(topicItems).find(function (btn) {
+          const li = btn.closest("li");
+          return !li || li.style.display !== "none";
+        });
+        if (firstVisible) {
+          selectTopic(firstVisible);
+        }
       })();
     </script>
   </body>

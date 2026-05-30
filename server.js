@@ -232,6 +232,18 @@ function initDatabase() {
       updated_at TEXT,
       FOREIGN KEY (created_by) REFERENCES users(id)
     );
+
+    CREATE TABLE IF NOT EXISTS help_requests (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      title TEXT NOT NULL,
+      message TEXT NOT NULL,
+      admin_reply TEXT DEFAULT '',
+      status TEXT CHECK(status IN ('open', 'replied')) NOT NULL DEFAULT 'open',
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      replied_at TEXT,
+      FOREIGN KEY (user_id) REFERENCES users(id)
+    );
   `);
 
   const videoColumns = db.prepare("PRAGMA table_info(videos)").all();
@@ -241,6 +253,7 @@ function initDatabase() {
   const hasLevel = videoColumns.some((c) => c.name === "level");
   const hasSourceType = videoColumns.some((c) => c.name === "source_type");
   const hasYoutubeUrl = videoColumns.some((c) => c.name === "youtube_url");
+  const hasExternalUrl = videoColumns.some((c) => c.name === "external_url");
 
   if (!hasModuleId) {
     db.exec("ALTER TABLE videos ADD COLUMN module_id INTEGER");
@@ -266,7 +279,12 @@ function initDatabase() {
     db.exec("ALTER TABLE videos ADD COLUMN youtube_url TEXT DEFAULT ''");
   }
 
+  if (!hasExternalUrl) {
+    db.exec("ALTER TABLE videos ADD COLUMN external_url TEXT DEFAULT ''");
+  }
+
   db.exec("UPDATE videos SET youtube_url = '' WHERE youtube_url IS NULL");
+  db.exec("UPDATE videos SET external_url = '' WHERE external_url IS NULL");
 
   const moduleColumns = db.prepare("PRAGMA table_info(modules)").all();
   const hasModuleLevel = moduleColumns.some((c) => c.name === "level");
@@ -506,6 +524,24 @@ function getYouTubeEmbedUrl(urlRaw) {
   }
 }
 
+function getExternalVideoUrl(urlRaw) {
+  const value = (urlRaw || "").trim();
+  if (!value) {
+    return null;
+  }
+
+  try {
+    const normalized = /^https?:\/\//i.test(value) ? value : `https://${value}`;
+    const url = new URL(normalized);
+    if (url.protocol !== "http:" && url.protocol !== "https:") {
+      return null;
+    }
+    return url.toString();
+  } catch (e) {
+    return null;
+  }
+}
+
 function getMailTransport() {
   const host = process.env.SMTP_HOST;
   const port = Number(process.env.SMTP_PORT || 587);
@@ -713,7 +749,7 @@ function buildCourseModules(user) {
   const modules = getModules();
   const videos = db
     .prepare(
-      "SELECT v.id, v.title, v.description, v.access_type, v.topic, v.level, v.source_type, v.youtube_url, v.module_id, v.lesson_order, v.created_at, m.access_type AS module_access_type, m.level AS module_level FROM videos v LEFT JOIN modules m ON m.id = v.module_id ORDER BY COALESCE(m.sort_order, 9999) ASC, m.created_at ASC, v.lesson_order ASC, v.created_at ASC"
+      "SELECT v.id, v.title, v.description, v.access_type, v.topic, v.level, v.source_type, v.youtube_url, v.external_url, v.module_id, v.lesson_order, v.created_at, m.access_type AS module_access_type, m.level AS module_level FROM videos v LEFT JOIN modules m ON m.id = v.module_id ORDER BY COALESCE(m.sort_order, 9999) ASC, m.created_at ASC, v.lesson_order ASC, v.created_at ASC"
     )
     .all();
 
@@ -1329,7 +1365,7 @@ app.get("/dashboard", requireAuth, (req, res) => {
   });
 });
 
-app.get("/posts", requireAuth, (req, res) => {
+app.get(["/posts", "/announcements"], requireAuth, (req, res) => {
   refreshSessionUser(req, req.session.user.id);
 
   const posts = req.session.user.has_paid_access || req.session.user.is_admin
@@ -1341,6 +1377,51 @@ app.get("/posts", requireAuth, (req, res) => {
         .all();
 
   res.render("posts", { posts });
+});
+
+app.get("/help", requireAuth, (req, res) => {
+  refreshSessionUser(req, req.session.user.id);
+
+  const helpRequests = db
+    .prepare(
+      "SELECT id, title, message, admin_reply, status, created_at, replied_at FROM help_requests WHERE user_id = ? ORDER BY created_at DESC"
+    )
+    .all(req.session.user.id);
+
+  res.render("help", {
+    helpRequests,
+    helpError: null,
+    helpSuccess: req.query.submitted === "1" ? "Your help request has been sent to admin." : null
+  });
+});
+
+app.post("/help-requests", requireAuth, (req, res) => {
+  const title = (req.body.title || "").trim();
+  const message = (req.body.message || "").trim();
+
+  refreshSessionUser(req, req.session.user.id);
+
+  const helpRequests = db
+    .prepare(
+      "SELECT id, title, message, admin_reply, status, created_at, replied_at FROM help_requests WHERE user_id = ? ORDER BY created_at DESC"
+    )
+    .all(req.session.user.id);
+
+  if (!title || !message) {
+    return res.status(400).render("help", {
+      helpRequests,
+      helpError: "Help title and message are required.",
+      helpSuccess: null
+    });
+  }
+
+  db.prepare("INSERT INTO help_requests (user_id, title, message) VALUES (?, ?, ?)").run(
+    req.session.user.id,
+    title,
+    message
+  );
+
+  return res.redirect("/help?submitted=1");
 });
 
 app.post("/api/favorites/:videoId", requireAuth, (req, res) => {
@@ -1680,6 +1761,11 @@ app.get("/video/:id", requireAuth, (req, res) => {
     return res.status(400).send("This lesson is hosted on YouTube and should be viewed from dashboard.");
   }
 
+  const externalUrl = (video.external_url || "").trim();
+  if (externalUrl) {
+    return res.redirect(externalUrl);
+  }
+
   const filePath = path.join(uploadDir, video.filename);
   if (!fs.existsSync(filePath)) {
     return res.status(404).send("Video file missing on server.");
@@ -1712,11 +1798,12 @@ app.get("/admin", requireAdmin, (req, res) => {
     free_students: users.filter((u) => !u.is_admin && !u.has_paid_access).length,
     pending_payments: 0,
     approved_payments: 0,
-    rejected_payments: 0
+    rejected_payments: 0,
+    open_help_requests: 0
   };
 
   const videos = db
-    .prepare("SELECT v.id, v.title, v.description, v.topic, v.level, v.source_type, v.youtube_url, v.access_type, v.lesson_order, v.created_at, m.title AS module_title, m.sort_order AS module_sort_order FROM videos v LEFT JOIN modules m ON m.id = v.module_id ORDER BY COALESCE(m.sort_order, 9999) ASC, v.lesson_order ASC, v.created_at ASC")
+    .prepare("SELECT v.id, v.title, v.description, v.topic, v.level, v.source_type, v.youtube_url, v.external_url, v.access_type, v.lesson_order, v.created_at, m.title AS module_title, m.sort_order AS module_sort_order FROM videos v LEFT JOIN modules m ON m.id = v.module_id ORDER BY COALESCE(m.sort_order, 9999) ASC, v.lesson_order ASC, v.created_at ASC")
     .all();
 
   const modules = getModules();
@@ -1737,6 +1824,9 @@ app.get("/admin", requireAdmin, (req, res) => {
     .get().count;
   summary.rejected_payments = db
     .prepare("SELECT COUNT(*) as count FROM payment_requests WHERE status = 'rejected'")
+    .get().count;
+  summary.open_help_requests = db
+    .prepare("SELECT COUNT(*) as count FROM help_requests WHERE status = 'open'")
     .get().count;
 
   const postSummary = {
@@ -1855,6 +1945,46 @@ app.post("/admin/posts/:id/delete", requireAdmin, (req, res) => {
   const postId = Number(req.params.id);
   db.prepare("DELETE FROM posts WHERE id = ?").run(postId);
   res.redirect("/admin/posts");
+});
+
+app.get("/admin/help", requireAdmin, (req, res) => {
+  const requests = db
+    .prepare(
+      "SELECT h.id, h.title, h.message, h.admin_reply, h.status, h.created_at, h.replied_at, u.name AS student_name, u.email AS student_email FROM help_requests h JOIN users u ON u.id = h.user_id ORDER BY CASE WHEN h.status = 'open' THEN 0 ELSE 1 END, h.created_at DESC"
+    )
+    .all();
+
+  res.render("admin-help", { requests, error: null });
+});
+
+app.post("/admin/help/:id/reply", requireAdmin, (req, res) => {
+  const requestId = Number(req.params.id);
+  const reply = (req.body.admin_reply || "").trim();
+
+  if (!Number.isInteger(requestId) || requestId <= 0) {
+    return res.status(400).send("Invalid request ID");
+  }
+
+  if (!reply) {
+    const requests = db
+      .prepare(
+        "SELECT h.id, h.title, h.message, h.admin_reply, h.status, h.created_at, h.replied_at, u.name AS student_name, u.email AS student_email FROM help_requests h JOIN users u ON u.id = h.user_id ORDER BY CASE WHEN h.status = 'open' THEN 0 ELSE 1 END, h.created_at DESC"
+      )
+      .all();
+    return res.status(400).render("admin-help", { requests, error: "Reply message is required." });
+  }
+
+  const existing = db.prepare("SELECT id FROM help_requests WHERE id = ?").get(requestId);
+  if (!existing) {
+    return res.status(404).send("Help request not found");
+  }
+
+  db.prepare("UPDATE help_requests SET admin_reply = ?, status = 'replied', replied_at = CURRENT_TIMESTAMP WHERE id = ?").run(
+    reply,
+    requestId
+  );
+
+  return res.redirect("/admin/help");
 });
 
 app.post("/admin/users/bulk-access", requireAdmin, (req, res) => {
@@ -2215,6 +2345,7 @@ app.post("/admin/users/:id/delete", requireAdmin, (req, res) => {
     db.prepare("DELETE FROM user_favorites WHERE user_id = ?").run(userId);
     db.prepare("DELETE FROM certificate_tokens WHERE user_id = ?").run(userId);
     db.prepare("DELETE FROM user_activity_logs WHERE user_id = ?").run(userId);
+    db.prepare("DELETE FROM help_requests WHERE user_id = ?").run(userId);
     db.prepare("UPDATE posts SET created_by = NULL WHERE created_by = ?").run(userId);
     db.prepare("DELETE FROM payment_requests WHERE user_id = ?").run(userId);
     db.prepare("DELETE FROM users WHERE id = ? AND is_admin = 0").run(userId);
@@ -2244,8 +2375,10 @@ app.post("/admin/videos/upload", requireAdmin, (req, res) => {
       ? req.body.level
       : "beginner";
     const accessType = req.body.access_type === "paid" ? "paid" : "free";
-    const sourceType = req.body.source_type === "youtube" ? "youtube" : "upload";
-    const youtubeEmbedUrl = sourceType === "youtube" ? getYouTubeEmbedUrl(req.body.youtube_url) : "";
+    const sourceMode = ["upload", "youtube", "external"].includes(req.body.source_type) ? req.body.source_type : "upload";
+    const sourceType = sourceMode === "youtube" ? "youtube" : "upload";
+    const youtubeEmbedUrl = sourceMode === "youtube" ? getYouTubeEmbedUrl(req.body.youtube_url) : "";
+    const externalUrl = sourceMode === "external" ? getExternalVideoUrl(req.body.external_url) : "";
     const moduleId = Number(req.body.module_id || 0) > 0 ? Number(req.body.module_id) : null;
     const lessonOrder = Number.isFinite(Number(req.body.lesson_order)) ? Number(req.body.lesson_order) : 0;
 
@@ -2266,31 +2399,39 @@ app.post("/admin/videos/upload", requireAdmin, (req, res) => {
       return res.status(400).render("upload-video", { error: "Video title is required.", modules: getModules() });
     }
 
-    if (sourceType === "upload" && !req.file) {
+    if (sourceMode === "upload" && !req.file) {
       if (isAjaxRequest(req)) {
         return res.status(400).json({ error: "Please choose a video file for upload source." });
       }
       return res.status(400).render("upload-video", { error: "Please choose a video file for upload source.", modules: getModules() });
     }
 
-    if (sourceType === "youtube" && !youtubeEmbedUrl) {
+    if (sourceMode === "youtube" && !youtubeEmbedUrl) {
       if (isAjaxRequest(req)) {
         return res.status(400).json({ error: "Enter a valid YouTube video URL." });
       }
       return res.status(400).render("upload-video", { error: "Enter a valid YouTube video URL.", modules: getModules() });
     }
 
+    if (sourceMode === "external" && !externalUrl) {
+      if (isAjaxRequest(req)) {
+        return res.status(400).json({ error: "Enter a valid external video URL (http/https)." });
+      }
+      return res.status(400).render("upload-video", { error: "Enter a valid external video URL (http/https).", modules: getModules() });
+    }
+
     db.prepare(
-      "INSERT INTO videos (title, description, topic, level, source_type, youtube_url, filename, mime_type, access_type, module_id, lesson_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+      "INSERT INTO videos (title, description, topic, level, source_type, youtube_url, external_url, filename, mime_type, access_type, module_id, lesson_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
     ).run(
       title,
       description,
       topic,
       level,
       sourceType,
-      sourceType === "youtube" ? youtubeEmbedUrl : "",
-      sourceType === "upload" ? req.file.filename : "",
-      sourceType === "upload" ? req.file.mimetype : "",
+      sourceMode === "youtube" ? youtubeEmbedUrl : "",
+      sourceMode === "external" ? externalUrl : "",
+      sourceMode === "upload" ? req.file.filename : "",
+      sourceMode === "upload" ? req.file.mimetype : "",
       accessType,
       moduleId,
       lessonOrder
@@ -2306,12 +2447,16 @@ app.post("/admin/videos/upload", requireAdmin, (req, res) => {
 
 app.get("/admin/videos/:id/edit", requireAdmin, (req, res) => {
   const video = db
-    .prepare("SELECT id, title, description, topic, level, source_type, youtube_url, access_type, module_id, lesson_order FROM videos WHERE id = ?")
+    .prepare("SELECT id, title, description, topic, level, source_type, youtube_url, external_url, access_type, module_id, lesson_order FROM videos WHERE id = ?")
     .get(req.params.id);
 
   if (!video) {
     return res.status(404).send("Video not found");
   }
+
+  video.source_mode = video.source_type === "youtube"
+    ? "youtube"
+    : ((video.external_url || "").trim() ? "external" : "upload");
 
   res.render("edit-video", { error: null, video, modules: getModules() });
 });
@@ -2324,14 +2469,16 @@ app.post("/admin/videos/:id/edit", requireAdmin, (req, res) => {
   const level = ["beginner", "intermediate", "advanced"].includes(req.body.level)
     ? req.body.level
     : "beginner";
-  const sourceType = req.body.source_type === "youtube" ? "youtube" : "upload";
-  const youtubeEmbedUrl = sourceType === "youtube" ? getYouTubeEmbedUrl(req.body.youtube_url) : "";
+  const sourceMode = ["upload", "youtube", "external"].includes(req.body.source_type) ? req.body.source_type : "upload";
+  const sourceType = sourceMode === "youtube" ? "youtube" : "upload";
+  const youtubeEmbedUrl = sourceMode === "youtube" ? getYouTubeEmbedUrl(req.body.youtube_url) : "";
+  const externalUrl = sourceMode === "external" ? getExternalVideoUrl(req.body.external_url) : "";
   const accessType = req.body.access_type === "paid" ? "paid" : "free";
   const moduleId = Number(req.body.module_id || 0) > 0 ? Number(req.body.module_id) : null;
   const lessonOrder = Number.isFinite(Number(req.body.lesson_order)) ? Number(req.body.lesson_order) : 0;
 
   const existing = db
-    .prepare("SELECT id, title, description, topic, level, source_type, youtube_url, filename, access_type, module_id, lesson_order FROM videos WHERE id = ?")
+    .prepare("SELECT id, title, description, topic, level, source_type, youtube_url, external_url, filename, access_type, module_id, lesson_order FROM videos WHERE id = ?")
     .get(videoId);
 
   if (!existing) {
@@ -2350,7 +2497,9 @@ app.post("/admin/videos/:id/edit", requireAdmin, (req, res) => {
           topic,
           level,
           source_type: sourceType,
+          source_mode: sourceMode,
           youtube_url: req.body.youtube_url || "",
+          external_url: req.body.external_url || "",
           access_type: accessType,
           module_id: moduleId,
           lesson_order: lessonOrder
@@ -2370,7 +2519,9 @@ app.post("/admin/videos/:id/edit", requireAdmin, (req, res) => {
         topic,
         level,
         source_type: sourceType,
+        source_mode: sourceMode,
         youtube_url: req.body.youtube_url || "",
+        external_url: req.body.external_url || "",
         access_type: accessType,
         module_id: moduleId,
         lesson_order: lessonOrder
@@ -2379,7 +2530,7 @@ app.post("/admin/videos/:id/edit", requireAdmin, (req, res) => {
     });
   }
 
-  if (sourceType === "youtube" && !youtubeEmbedUrl) {
+  if (sourceMode === "youtube" && !youtubeEmbedUrl) {
     return res.status(400).render("edit-video", {
       error: "Enter a valid YouTube video URL.",
       video: {
@@ -2389,7 +2540,9 @@ app.post("/admin/videos/:id/edit", requireAdmin, (req, res) => {
         topic,
         level,
         source_type: sourceType,
+        source_mode: sourceMode,
         youtube_url: req.body.youtube_url || "",
+        external_url: req.body.external_url || "",
         access_type: accessType,
         module_id: moduleId,
         lesson_order: lessonOrder
@@ -2398,17 +2551,19 @@ app.post("/admin/videos/:id/edit", requireAdmin, (req, res) => {
     });
   }
 
-  if (sourceType === "upload" && existing.source_type === "youtube") {
+  if (sourceMode === "external" && !externalUrl) {
     return res.status(400).render("edit-video", {
-      error: "YouTube lessons cannot be switched to upload here. Create a new uploaded lesson instead.",
+      error: "Enter a valid external video URL (http/https).",
       video: {
         id: videoId,
         title,
         description,
         topic,
         level,
-        source_type: existing.source_type,
-        youtube_url: existing.youtube_url || "",
+        source_type: sourceType,
+        source_mode: sourceMode,
+        youtube_url: req.body.youtube_url || "",
+        external_url: req.body.external_url || "",
         access_type: accessType,
         module_id: moduleId,
         lesson_order: lessonOrder
@@ -2417,20 +2572,46 @@ app.post("/admin/videos/:id/edit", requireAdmin, (req, res) => {
     });
   }
 
-  db.prepare("UPDATE videos SET title = ?, description = ?, topic = ?, level = ?, source_type = ?, youtube_url = ?, access_type = ?, module_id = ?, lesson_order = ? WHERE id = ?").run(
+  const existingMode = existing.source_type === "youtube"
+    ? "youtube"
+    : ((existing.external_url || "").trim() ? "external" : "upload");
+
+  if (sourceMode === "upload" && existingMode !== "upload") {
+    return res.status(400).render("edit-video", {
+      error: "Linked lessons cannot be switched to upload here. Create a new uploaded lesson instead.",
+      video: {
+        id: videoId,
+        title,
+        description,
+        topic,
+        level,
+        source_type: sourceType,
+        source_mode: sourceMode,
+        youtube_url: existing.youtube_url || "",
+        external_url: existing.external_url || "",
+        access_type: accessType,
+        module_id: moduleId,
+        lesson_order: lessonOrder
+      },
+      modules: getModules()
+    });
+  }
+
+  db.prepare("UPDATE videos SET title = ?, description = ?, topic = ?, level = ?, source_type = ?, youtube_url = ?, external_url = ?, access_type = ?, module_id = ?, lesson_order = ? WHERE id = ?").run(
     title,
     description,
     topic,
     level,
     sourceType,
-    sourceType === "youtube" ? youtubeEmbedUrl : "",
+    sourceMode === "youtube" ? youtubeEmbedUrl : "",
+    sourceMode === "external" ? externalUrl : "",
     accessType,
     moduleId,
     lessonOrder,
     videoId
   );
 
-  if (existing.source_type === "upload" && sourceType === "youtube" && existing.filename) {
+  if (existingMode === "upload" && sourceMode !== "upload" && existing.filename) {
     const filePath = path.join(uploadDir, existing.filename);
     if (fs.existsSync(filePath)) {
       fs.unlinkSync(filePath);

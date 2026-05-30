@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Help | CMT Students</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <img src="/logo.svg" alt="Clap Money Trading" class="brand-logo" />
+        <div>
+          <h1 class="brand-title">Help Desk</h1>
+          <p class="brand-subtitle">Raise your doubts and get admin replies</p>
+        </div>
+      </div>
+      <div class="topbar-actions">
+        <a href="/dashboard" class="btn-link">Dashboard</a>
+        <a href="/announcements" class="btn-link">Announcement</a>
+        <% if (currentUser.is_admin) { %>
+          <a href="/admin/help" class="btn-link">Help Requests</a>
+        <% } %>
+        <form method="post" action="/logout">
+          <button type="submit" class="danger">Logout</button>
+        </form>
+      </div>
+    </header>
+
+    <main class="container stack-gap">
+      <section class="card" id="help-form">
+        <h2>Need Help?</h2>
+        <p class="muted">Submit your doubt with title and message.</p>
+
+        <% if (helpError) { %>
+          <div class="alert"><%= helpError %></div>
+        <% } %>
+        <% if (helpSuccess) { %>
+          <div class="success"><%= helpSuccess %></div>
+        <% } %>
+
+        <form method="post" action="/help-requests" class="form-grid module-form">
+          <label>Title</label>
+          <input type="text" name="title" required />
+
+          <label>Message</label>
+          <textarea name="message" rows="5" required></textarea>
+
+          <button type="submit">Send Help Request</button>
+        </form>
+      </section>
+
+      <section class="card">
+        <h2>Your Help Requests</h2>
+        <% if (!helpRequests || !helpRequests.length) { %>
+          <p class="muted">No help requests sent yet.</p>
+        <% } else { %>
+          <% helpRequests.forEach((item) => { %>
+            <article class="post-card">
+              <div class="post-head">
+                <h3><%= item.title %></h3>
+                <span class="pill <%= item.status === 'replied' ? 'pill-free' : 'pill-paid' %>"><%= item.status.toUpperCase() %></span>
+              </div>
+              <p class="muted">Sent on <%= item.created_at %></p>
+              <p class="post-body"><%= item.message %></p>
+
+              <% if (item.admin_reply) { %>
+                <div class="card" style="margin-top: 10px;">
+                  <h4>Admin Reply</h4>
+                  <p class="muted"><%= item.replied_at || '' %></p>
+                  <p class="post-body"><%= item.admin_reply %></p>
+                </div>
+              <% } %>
+            </article>
+          <% }) %>
+        <% } %>
+      </section>
+    </main>
+  </body>
+</html>

@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Help Requests | CMT Students</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <img src="/logo.svg" alt="Clap Money Trading" class="brand-logo" />
+        <div>
+          <h1 class="brand-title">Student Help Requests</h1>
+          <p class="brand-subtitle">View student doubts and send replies</p>
+        </div>
+      </div>
+      <div class="topbar-actions">
+        <a href="/admin" class="btn-link">Admin Home</a>
+        <a href="/admin/posts" class="btn-link">Announcements</a>
+        <form method="post" action="/logout">
+          <button type="submit" class="danger">Logout</button>
+        </form>
+      </div>
+    </header>
+
+    <main class="container">
+      <section class="card">
+        <% if (error) { %>
+          <div class="alert"><%= error %></div>
+        <% } %>
+
+        <% if (!requests.length) { %>
+          <p class="muted">No help requests yet.</p>
+        <% } else { %>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Student</th>
+                  <th>Title & Message</th>
+                  <th>Status</th>
+                  <th>Reply</th>
+                </tr>
+              </thead>
+              <tbody>
+                <% requests.forEach((item) => { %>
+                  <tr>
+                    <td>
+                      <strong><%= item.student_name %></strong><br />
+                      <span class="muted"><%= item.student_email %></span><br />
+                      <span class="muted"><%= item.created_at %></span>
+                    </td>
+                    <td>
+                      <strong><%= item.title %></strong>
+                      <p class="post-body"><%= item.message %></p>
+                    </td>
+                    <td>
+                      <span class="pill <%= item.status === 'replied' ? 'pill-free' : 'pill-paid' %>">
+                        <%= item.status.toUpperCase() %>
+                      </span>
+                      <% if (item.replied_at) { %>
+                        <p class="muted">Replied: <%= item.replied_at %></p>
+                      <% } %>
+                    </td>
+                    <td>
+                      <form method="post" action="/admin/help/<%= item.id %>/reply" class="form-grid compact">
+                        <textarea name="admin_reply" rows="4" placeholder="Type your reply here" required><%= item.admin_reply || '' %></textarea>
+                        <button type="submit"><%= item.admin_reply ? 'Update Reply' : 'Send Reply' %></button>
+                      </form>
+                    </td>
+                  </tr>
+                <% }) %>
+              </tbody>
+            </table>
+          </div>
+        <% } %>
+      </section>
+    </main>
+  </body>
+</html>
