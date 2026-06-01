@@ -1,0 +1,18 @@
+step 1 :
+
+after code push to githyb:
+
+git add .
+git commit -m "your message"
+git push
+
+step 2:
+
+open -> https://render.com/
+
+login gmail account and connect git hub
+
+deployee the code 
+
+deployee manuval -> last commit
+

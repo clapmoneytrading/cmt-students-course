@@ -28,6 +28,9 @@
         <% if (message === 'otp_sent') { %>
           <div class="alert success">A new OTP has been sent to your email.</div>
         <% } %>
+        <% if (message === 'otp_failed') { %>
+          <div class="alert">Unable to send OTP email right now. Please check SMTP settings in Render and try Resend OTP.</div>
+        <% } %>
         <% if (error) { %>
           <div class="alert"><%= error %></div>
         <% } %>

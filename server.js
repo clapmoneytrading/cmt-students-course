@@ -547,6 +547,9 @@ function getMailTransport() {
   const port = Number(process.env.SMTP_PORT || 587);
   const user = process.env.SMTP_USER;
   const pass = process.env.SMTP_PASS;
+  const secure = String(process.env.SMTP_SECURE || (port === 465 ? "true" : "false")).toLowerCase() === "true";
+  const requireTLS = String(process.env.SMTP_REQUIRE_TLS || (port === 587 ? "true" : "false")).toLowerCase() === "true";
+  const forceIPv4 = String(process.env.SMTP_FORCE_IPV4 || "true").toLowerCase() === "true";
 
   if (!host || !user || !pass) {
     return null;
@@ -555,7 +558,15 @@ function getMailTransport() {
   return nodemailer.createTransport({
     host,
     port,
-    secure: port === 465,
+    secure,
+    requireTLS,
+    connectionTimeout: Number(process.env.SMTP_CONNECTION_TIMEOUT_MS || 20000),
+    greetingTimeout: Number(process.env.SMTP_GREETING_TIMEOUT_MS || 12000),
+    socketTimeout: Number(process.env.SMTP_SOCKET_TIMEOUT_MS || 25000),
+    family: forceIPv4 ? 4 : 0,
+    tls: {
+      minVersion: "TLSv1.2"
+    },
     auth: { user, pass }
   });
 }
@@ -1001,11 +1012,13 @@ app.post("/register", async (req, res) => {
     makeExpiry(OTP_EXPIRY_MINUTES / 60)
   );
 
-  Promise.all([sendVerificationEmail(email, token), sendOtpEmail(email, otpCode)]).catch((e) => {
+  try {
+    await Promise.all([sendVerificationEmail(email, token), sendOtpEmail(email, otpCode)]);
+    return res.redirect(`/verify-otp?email=${encodeURIComponent(email)}&message=otp_sent`);
+  } catch (e) {
     console.error("Failed to send registration emails", e);
-  });
-
-  res.redirect(`/verify-otp?email=${encodeURIComponent(email)}`);
+    return res.redirect(`/verify-otp?email=${encodeURIComponent(email)}&message=otp_failed`);
+  }
 });
 
 app.get("/verify-otp", (req, res) => {
@@ -1080,11 +1093,11 @@ app.post("/verify-otp/resend", async (req, res) => {
 
   try {
     await sendOtpEmail(email, otpCode);
+    return res.redirect(`/verify-otp?email=${encodeURIComponent(email)}&message=otp_sent`);
   } catch (e) {
     console.error("Failed to resend OTP", e);
+    return res.redirect(`/verify-otp?email=${encodeURIComponent(email)}&message=otp_failed`);
   }
-
-  return res.redirect(`/verify-otp?email=${encodeURIComponent(email)}&message=otp_sent`);
 });
 
 app.get("/login", (req, res) => {
