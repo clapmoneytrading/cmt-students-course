@@ -12,6 +12,7 @@
     "@capacitor/android": "^8.3.4",
     "@capacitor/cli": "^8.3.4",
     "@capacitor/core": "^8.3.4",
+    "archiver": "^8.0.0",
     "bcryptjs": "^2.4.3",
     "better-sqlite3": "^11.8.1",
     "dotenv": "^16.4.5",
@@ -20,6 +21,7 @@
     "express-session": "^1.18.1",
     "multer": "^1.4.5-lts.1",
     "nodemailer": "^6.9.14",
-    "pdfkit": "^0.15.0"
+    "pdfkit": "^0.15.0",
+    "unzipper": "^0.12.3"
   }
 }

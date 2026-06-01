@@ -10,6 +10,8 @@ const Database = require("better-sqlite3");
 const multer = require("multer");
 const nodemailer = require("nodemailer");
 const PDFDocument = require("pdfkit");
+const archiver = require("archiver");
+const unzipper = require("unzipper");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -71,10 +73,13 @@ try {
 const uploadDir = path.join(rootDir, "uploads", "videos");
 const paymentProofDir = path.join(rootDir, "uploads", "payments");
 const backupTempDir = path.join(rootDir, "uploads", "tmp");
+const rollbackSnapshotDir = path.join(rootDir, "uploads", "rollback");
+const REQUIRED_BACKUP_TABLES = ["users", "videos", "modules", "payment_requests", "posts", "help_requests"];
 
 fs.mkdirSync(uploadDir, { recursive: true });
 fs.mkdirSync(paymentProofDir, { recursive: true });
 fs.mkdirSync(backupTempDir, { recursive: true });
+fs.mkdirSync(rollbackSnapshotDir, { recursive: true });
 
 const db = new Database(dbPath);
 db.pragma("journal_mode = WAL");
@@ -443,8 +448,9 @@ const uploadBackupDb = multer({
     const filename = (file.originalname || "").toLowerCase();
     const mime = (file.mimetype || "").toLowerCase();
     const looksLikeSqlite = filename.endsWith(".sqlite") || filename.endsWith(".db") || mime.includes("sqlite");
-    if (!looksLikeSqlite) {
-      return cb(new Error("Upload a valid SQLite backup file (.sqlite or .db)."));
+    const looksLikeZip = filename.endsWith(".zip") || mime.includes("zip");
+    if (!looksLikeSqlite && !looksLikeZip) {
+      return cb(new Error("Upload a valid backup file (.zip, .sqlite, or .db)."));
     }
     cb(null, true);
   }
@@ -760,6 +766,169 @@ function restoreDatabaseFromSqliteFile(sourcePath) {
       db.prepare("DETACH DATABASE restore_src").run();
     }
     db.exec("PRAGMA foreign_keys = ON");
+  }
+}
+
+function assertSqliteBackupIntegrity(sqlitePath) {
+  if (!fs.existsSync(sqlitePath)) {
+    throw new Error("Backup database file is missing.");
+  }
+
+  let backupDb;
+  try {
+    backupDb = new Database(sqlitePath, { readonly: true, fileMustExist: true });
+  } catch (e) {
+    throw new Error("Invalid SQLite backup file.");
+  }
+
+  try {
+    const tables = new Set(
+      backupDb
+        .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'")
+        .all()
+        .map((row) => row.name)
+    );
+
+    const missing = REQUIRED_BACKUP_TABLES.filter((name) => !tables.has(name));
+    if (missing.length) {
+      throw new Error(`Backup database missing required tables: ${missing.join(", ")}`);
+    }
+  } finally {
+    backupDb.close();
+  }
+}
+
+function appendBackupArchiveContents(archive, meta = {}) {
+  archive.file(dbPath, { name: "database.sqlite" });
+
+  if (fs.existsSync(uploadDir)) {
+    archive.directory(uploadDir, "uploads/videos");
+  }
+
+  if (fs.existsSync(paymentProofDir)) {
+    archive.directory(paymentProofDir, "uploads/payments");
+  }
+
+  archive.append(
+    JSON.stringify(
+      {
+        generated_at: new Date().toISOString(),
+        db_path: dbPath,
+        includes: ["database.sqlite", "uploads/videos", "uploads/payments"],
+        ...meta
+      },
+      null,
+      2
+    ),
+    { name: "backup-manifest.json" }
+  );
+}
+
+function createRollbackSnapshotZip() {
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const filePath = path.join(rollbackSnapshotDir, `rollback-${stamp}.zip`);
+
+  return new Promise((resolve, reject) => {
+    const output = fs.createWriteStream(filePath);
+    const archive = archiver("zip", { zlib: { level: 9 } });
+
+    output.on("close", () => resolve(filePath));
+    output.on("error", reject);
+    archive.on("error", reject);
+
+    archive.pipe(output);
+    appendBackupArchiveContents(archive, {
+      backup_type: "rollback_snapshot",
+      purpose: "auto-created before import restore"
+    });
+    archive.finalize();
+  });
+}
+
+function clearDirectoryContents(targetDir) {
+  if (!fs.existsSync(targetDir)) {
+    fs.mkdirSync(targetDir, { recursive: true });
+    return;
+  }
+
+  const entries = fs.readdirSync(targetDir, { withFileTypes: true });
+  for (const entry of entries) {
+    const fullPath = path.join(targetDir, entry.name);
+    fs.rmSync(fullPath, { recursive: true, force: true });
+  }
+}
+
+function copyDirectoryRecursive(sourceDir, targetDir) {
+  if (!fs.existsSync(sourceDir)) {
+    return;
+  }
+
+  fs.mkdirSync(targetDir, { recursive: true });
+  const entries = fs.readdirSync(sourceDir, { withFileTypes: true });
+
+  for (const entry of entries) {
+    const srcPath = path.join(sourceDir, entry.name);
+    const dstPath = path.join(targetDir, entry.name);
+    if (entry.isDirectory()) {
+      copyDirectoryRecursive(srcPath, dstPath);
+    } else if (entry.isFile()) {
+      fs.copyFileSync(srcPath, dstPath);
+    }
+  }
+}
+
+async function restoreFromZipBackup(zipPath, options = {}) {
+  const requireFolderStructure = options.requireFolderStructure !== false;
+  const validateOnly = options.validateOnly === true;
+  const extractDir = path.join(backupTempDir, `extract-${Date.now()}-${Math.round(Math.random() * 1e9)}`);
+  fs.mkdirSync(extractDir, { recursive: true });
+
+  try {
+    await fs.createReadStream(zipPath).pipe(unzipper.Extract({ path: extractDir })).promise();
+
+    const sqliteCandidates = [
+      path.join(extractDir, "database.sqlite"),
+      path.join(extractDir, "backup.sqlite"),
+      path.join(extractDir, "cmt-backup.sqlite")
+    ];
+
+    const backupDbFile = sqliteCandidates.find((p) => fs.existsSync(p));
+    if (!backupDbFile) {
+      throw new Error("ZIP backup is missing database.sqlite");
+    }
+
+    assertSqliteBackupIntegrity(backupDbFile);
+
+    const uploadsRoot = path.join(extractDir, "uploads");
+    const sourceVideoDir = path.join(extractDir, "uploads", "videos");
+    const sourcePaymentDir = path.join(extractDir, "uploads", "payments");
+
+    if (requireFolderStructure) {
+      const hasUploadsDir = fs.existsSync(uploadsRoot) && fs.statSync(uploadsRoot).isDirectory();
+      const hasVideosDir = fs.existsSync(sourceVideoDir) && fs.statSync(sourceVideoDir).isDirectory();
+      const hasPaymentsDir = fs.existsSync(sourcePaymentDir) && fs.statSync(sourcePaymentDir).isDirectory();
+      if (!hasUploadsDir || !hasVideosDir || !hasPaymentsDir) {
+        throw new Error("ZIP backup folder structure is invalid. Required: uploads/videos and uploads/payments");
+      }
+    }
+
+    if (validateOnly) {
+      return;
+    }
+
+    restoreDatabaseFromSqliteFile(backupDbFile);
+
+    if (fs.existsSync(sourceVideoDir)) {
+      clearDirectoryContents(uploadDir);
+      copyDirectoryRecursive(sourceVideoDir, uploadDir);
+    }
+
+    if (fs.existsSync(sourcePaymentDir)) {
+      clearDirectoryContents(paymentProofDir);
+      copyDirectoryRecursive(sourcePaymentDir, paymentProofDir);
+    }
+  } finally {
+    fs.rmSync(extractDir, { recursive: true, force: true });
   }
 }
 
@@ -1865,12 +2034,28 @@ app.get("/admin/backup/export", requireAdmin, (req, res) => {
   }
 
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-  const fileName = `cmt-backup-${stamp}.sqlite`;
-  return res.download(dbPath, fileName);
+  const fileName = `cmt-full-backup-${stamp}.zip`;
+
+  res.attachment(fileName);
+  const archive = archiver("zip", { zlib: { level: 9 } });
+
+  archive.on("error", (err) => {
+    console.error("Backup export failed", err);
+    if (!res.headersSent) {
+      res.status(500).send("Backup export failed.");
+    } else {
+      res.end();
+    }
+  });
+
+  archive.pipe(res);
+  appendBackupArchiveContents(archive, { backup_type: "manual_export" });
+
+  archive.finalize();
 });
 
 app.post("/admin/backup/import", requireAdmin, (req, res) => {
-  uploadBackupDb.single("backup_file")(req, res, (err) => {
+  uploadBackupDb.single("backup_file")(req, res, async (err) => {
     if (err) {
       return res.redirect(`/admin?warning=${encodeURIComponent(err.message || "Backup upload failed")}`);
     }
@@ -1881,14 +2066,47 @@ app.post("/admin/backup/import", requireAdmin, (req, res) => {
 
     const tempName = `restore-${Date.now()}-${Math.round(Math.random() * 1e9)}.sqlite`;
     const tempPath = path.join(backupTempDir, tempName);
+    const incomingName = (req.file.originalname || "").toLowerCase();
+    const incomingMime = (req.file.mimetype || "").toLowerCase();
+    const isZipBackup = incomingName.endsWith(".zip") || incomingMime.includes("zip");
+    let rollbackSnapshotPath = "";
+    let rollbackRestored = false;
 
     try {
       fs.writeFileSync(tempPath, req.file.buffer);
-      restoreDatabaseFromSqliteFile(tempPath);
+
+      if (isZipBackup) {
+        await restoreFromZipBackup(tempPath, { validateOnly: true, requireFolderStructure: true });
+      } else {
+        assertSqliteBackupIntegrity(tempPath);
+      }
+
+      rollbackSnapshotPath = await createRollbackSnapshotZip();
+
+      if (isZipBackup) {
+        await restoreFromZipBackup(tempPath, { requireFolderStructure: true });
+      } else {
+        restoreDatabaseFromSqliteFile(tempPath);
+      }
+
       return res.redirect("/admin?message=backup_imported");
     } catch (e) {
       console.error("Backup import failed", e);
-      return res.redirect(`/admin?warning=${encodeURIComponent("Backup import failed. Ensure backup is from same app version.")}`);
+
+      if (rollbackSnapshotPath && fs.existsSync(rollbackSnapshotPath)) {
+        try {
+          await restoreFromZipBackup(rollbackSnapshotPath, { requireFolderStructure: true });
+          rollbackRestored = true;
+        } catch (rollbackError) {
+          console.error("Rollback restore failed", rollbackError);
+        }
+      }
+
+      const warningMessage = rollbackRestored
+        ? "Backup import failed. Previous data restored from rollback snapshot."
+        : "Backup import failed. Ensure backup format/schema is valid.";
+
+      return res.redirect(`/admin?warning=${encodeURIComponent(warningMessage)}`);
     } finally {
       if (fs.existsSync(tempPath)) {
         fs.unlinkSync(tempPath);
