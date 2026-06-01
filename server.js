@@ -15,7 +15,22 @@ const archiverModule = require("archiver");
 const unzipper = require("unzipper");
 
 const app = express();
-const archiver = typeof archiverModule === "function" ? archiverModule : archiverModule.default;
+
+function createZipArchive(options = { zlib: { level: 9 } }) {
+  if (typeof archiverModule === "function") {
+    return archiverModule("zip", options);
+  }
+
+  if (archiverModule && typeof archiverModule.ZipArchive === "function") {
+    return new archiverModule.ZipArchive(options);
+  }
+
+  if (archiverModule && typeof archiverModule.default === "function") {
+    return archiverModule.default("zip", options);
+  }
+
+  throw new Error("Archiver module is not available. Reinstall dependencies and redeploy.");
+}
 const PORT = process.env.PORT || 3000;
 const SESSION_SECRET = process.env.SESSION_SECRET || "dev-secret-change-this";
 const PAYMENT_UPI_ID = process.env.PAYMENT_UPI_ID || "";
@@ -855,13 +870,9 @@ function appendBackupArchiveContents(archive, meta = {}) {
 }
 
 function createBackupZipToPath(filePath, meta = {}) {
-  if (typeof archiver !== "function") {
-    throw new Error("Archiver module is not available. Reinstall dependencies and redeploy.");
-  }
-
   return new Promise((resolve, reject) => {
     const output = fs.createWriteStream(filePath);
-    const archive = archiver("zip", { zlib: { level: 9 } });
+    const archive = createZipArchive({ zlib: { level: 9 } });
 
     output.on("close", () => resolve(filePath));
     output.on("error", reject);
