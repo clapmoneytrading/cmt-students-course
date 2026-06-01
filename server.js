@@ -2344,23 +2344,44 @@ app.post("/admin/users/bulk-access", requireAdmin, (req, res) => {
   res.redirect("/admin");
 });
 
-app.get("/admin/export/students.csv", requireAdmin, (req, res) => {
+app.get(["/admin/export/students.csv", "/learn/admin/export/students.csv"], requireAdmin, (req, res) => {
   const rows = db
     .prepare(
       "SELECT u.id, u.name, u.email, u.phone, u.has_paid_access, u.created_at, (SELECT MAX(created_at) FROM user_activity_logs l WHERE l.user_id = u.id AND l.event_type = 'login') AS last_login, (SELECT COUNT(*) FROM video_progress vp WHERE vp.user_id = u.id AND vp.completed = 1) AS watched_count FROM users u ORDER BY u.created_at DESC"
     )
     .all();
 
-  const header = ["id", "name", "email", "phone", "has_paid_access", "created_at", "last_login", "watched_count"].join(",");
+  const header = [
+    "Student ID",
+    "Student Name",
+    "User (Email)",
+    "Phone",
+    "Access Type",
+    "Paid Access (Yes/No)",
+    "Created At",
+    "Last Login",
+    "Videos Watched"
+  ].join(",");
   const body = rows
     .map((r) =>
-      [r.id, r.name, r.email, r.phone || "", r.has_paid_access, r.created_at, r.last_login || "", r.watched_count].map(csvEscape).join(",")
+      [
+        r.id,
+        r.name,
+        r.email,
+        r.phone || "",
+        r.has_paid_access ? "Paid" : "Free",
+        r.has_paid_access ? "Yes" : "No",
+        r.created_at,
+        r.last_login || "",
+        r.watched_count
+      ].map(csvEscape).join(",")
     )
     .join("\n");
 
   res.setHeader("Content-Type", "text/csv");
-  res.setHeader("Content-Disposition", "attachment; filename=students-export.csv");
-  res.send(`${header}\n${body}`);
+  res.setHeader("Content-Disposition", "attachment; filename=students-export-excel.csv");
+  // UTF-8 BOM helps Excel open CSV with correct encoding.
+  res.send(`\uFEFF${header}\n${body}`);
 });
 
 app.get("/admin/export/payments.csv", requireAdmin, (req, res) => {
