@@ -11,10 +11,11 @@ const Database = require("better-sqlite3");
 const multer = require("multer");
 const nodemailer = require("nodemailer");
 const PDFDocument = require("pdfkit");
-const archiver = require("archiver");
+const archiverModule = require("archiver");
 const unzipper = require("unzipper");
 
 const app = express();
+const archiver = typeof archiverModule === "function" ? archiverModule : archiverModule.default;
 const PORT = process.env.PORT || 3000;
 const SESSION_SECRET = process.env.SESSION_SECRET || "dev-secret-change-this";
 const PAYMENT_UPI_ID = process.env.PAYMENT_UPI_ID || "";
@@ -854,6 +855,10 @@ function appendBackupArchiveContents(archive, meta = {}) {
 }
 
 function createBackupZipToPath(filePath, meta = {}) {
+  if (typeof archiver !== "function") {
+    throw new Error("Archiver module is not available. Reinstall dependencies and redeploy.");
+  }
+
   return new Promise((resolve, reject) => {
     const output = fs.createWriteStream(filePath);
     const archive = archiver("zip", { zlib: { level: 9 } });
