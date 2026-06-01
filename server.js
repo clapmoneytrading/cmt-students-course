@@ -2028,7 +2028,11 @@ app.get("/admin", requireAdmin, (req, res) => {
   });
 });
 
-app.get("/admin/backup/export", requireAdmin, (req, res) => {
+function getAdminRootPath(req) {
+  return req.path.startsWith("/learn/") ? "/learn/admin" : "/admin";
+}
+
+app.get(["/admin/backup/export", "/learn/admin/backup/export"], requireAdmin, (req, res) => {
   if (!fs.existsSync(dbPath)) {
     return res.status(404).send("Database file not found on server.");
   }
@@ -2054,14 +2058,16 @@ app.get("/admin/backup/export", requireAdmin, (req, res) => {
   archive.finalize();
 });
 
-app.post("/admin/backup/import", requireAdmin, (req, res) => {
+app.post(["/admin/backup/import", "/learn/admin/backup/import"], requireAdmin, (req, res) => {
   uploadBackupDb.single("backup_file")(req, res, async (err) => {
+    const adminRoot = getAdminRootPath(req);
+
     if (err) {
-      return res.redirect(`/admin?warning=${encodeURIComponent(err.message || "Backup upload failed")}`);
+      return res.redirect(`${adminRoot}?warning=${encodeURIComponent(err.message || "Backup upload failed")}`);
     }
 
     if (!req.file || !req.file.buffer || !req.file.buffer.length) {
-      return res.redirect(`/admin?warning=${encodeURIComponent("Backup file is required")}`);
+      return res.redirect(`${adminRoot}?warning=${encodeURIComponent("Backup file is required")}`);
     }
 
     const tempName = `restore-${Date.now()}-${Math.round(Math.random() * 1e9)}.sqlite`;
@@ -2089,7 +2095,7 @@ app.post("/admin/backup/import", requireAdmin, (req, res) => {
         restoreDatabaseFromSqliteFile(tempPath);
       }
 
-      return res.redirect("/admin?message=backup_imported");
+      return res.redirect(`${adminRoot}?message=backup_imported`);
     } catch (e) {
       console.error("Backup import failed", e);
 
@@ -2106,7 +2112,7 @@ app.post("/admin/backup/import", requireAdmin, (req, res) => {
         ? "Backup import failed. Previous data restored from rollback snapshot."
         : "Backup import failed. Ensure backup format/schema is valid.";
 
-      return res.redirect(`/admin?warning=${encodeURIComponent(warningMessage)}`);
+      return res.redirect(`${adminRoot}?warning=${encodeURIComponent(warningMessage)}`);
     } finally {
       if (fs.existsSync(tempPath)) {
         fs.unlinkSync(tempPath);
