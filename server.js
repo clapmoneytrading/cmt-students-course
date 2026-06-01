@@ -836,15 +836,25 @@ function assertSqliteBackupIntegrity(sqlitePath) {
 
     const missing = REQUIRED_BACKUP_TABLES.filter((name) => !tables.has(name));
     if (missing.length) {
-      throw new Error(`Backup database missing required tables: ${missing.join(", ")}`);
+      throw new Error(
+        `Backup database missing required tables: ${missing.join(", ")}. Use a file generated from Export Full Backup (ZIP).`
+      );
     }
   } finally {
     backupDb.close();
   }
 }
 
-function appendBackupArchiveContents(archive, meta = {}) {
-  archive.file(dbPath, { name: "database.sqlite" });
+function createDatabaseSnapshotForBackup() {
+  const snapshotPath = path.join(backupTempDir, `db-snapshot-${Date.now()}-${Math.round(Math.random() * 1e9)}.sqlite`);
+  // Flush WAL pages into the DB file so backups are consistent for restore.
+  db.pragma("wal_checkpoint(TRUNCATE)");
+  fs.copyFileSync(dbPath, snapshotPath);
+  return snapshotPath;
+}
+
+function appendBackupArchiveContents(archive, meta = {}, dbFilePath = dbPath) {
+  archive.file(dbFilePath, { name: "database.sqlite" });
 
   if (fs.existsSync(uploadDir)) {
     archive.directory(uploadDir, "uploads/videos");
@@ -873,13 +883,36 @@ function createBackupZipToPath(filePath, meta = {}) {
   return new Promise((resolve, reject) => {
     const output = fs.createWriteStream(filePath);
     const archive = createZipArchive({ zlib: { level: 9 } });
+    let snapshotPath = "";
 
-    output.on("close", () => resolve(filePath));
-    output.on("error", reject);
-    archive.on("error", reject);
+    const cleanupSnapshot = () => {
+      if (snapshotPath && fs.existsSync(snapshotPath)) {
+        fs.unlinkSync(snapshotPath);
+      }
+    };
+
+    try {
+      snapshotPath = createDatabaseSnapshotForBackup();
+    } catch (e) {
+      reject(e);
+      return;
+    }
+
+    output.on("close", () => {
+      cleanupSnapshot();
+      resolve(filePath);
+    });
+    output.on("error", (e) => {
+      cleanupSnapshot();
+      reject(e);
+    });
+    archive.on("error", (e) => {
+      cleanupSnapshot();
+      reject(e);
+    });
 
     archive.pipe(output);
-    appendBackupArchiveContents(archive, meta);
+    appendBackupArchiveContents(archive, meta, snapshotPath || dbPath);
     archive.finalize();
   });
 }
