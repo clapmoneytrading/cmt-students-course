@@ -3,6 +3,7 @@ require("dotenv").config();
 const express = require("express");
 const path = require("path");
 const fs = require("fs");
+const os = require("os");
 const crypto = require("crypto");
 const session = require("express-session");
 const bcrypt = require("bcryptjs");
@@ -72,8 +73,36 @@ try {
 }
 const uploadDir = path.join(rootDir, "uploads", "videos");
 const paymentProofDir = path.join(rootDir, "uploads", "payments");
-const backupTempDir = path.join(rootDir, "uploads", "tmp");
-const rollbackSnapshotDir = path.join(rootDir, "uploads", "rollback");
+
+function resolveWritableDir(candidates) {
+  for (const candidate of candidates) {
+    if (!candidate) {
+      continue;
+    }
+    try {
+      fs.mkdirSync(candidate, { recursive: true });
+      fs.accessSync(candidate, fs.constants.W_OK);
+      return candidate;
+    } catch (e) {
+      // Try next candidate.
+    }
+  }
+  throw new Error("No writable backup directory available.");
+}
+
+const backupTempDir = resolveWritableDir([
+  process.env.BACKUP_TEMP_DIR ? path.resolve(process.env.BACKUP_TEMP_DIR) : "",
+  path.join(path.dirname(dbPath), "tmp"),
+  path.join(rootDir, "uploads", "tmp"),
+  path.join(os.tmpdir(), "cmt-backups")
+]);
+
+const rollbackSnapshotDir = resolveWritableDir([
+  process.env.BACKUP_ROLLBACK_DIR ? path.resolve(process.env.BACKUP_ROLLBACK_DIR) : "",
+  path.join(path.dirname(dbPath), "rollback"),
+  path.join(rootDir, "uploads", "rollback"),
+  path.join(os.tmpdir(), "cmt-rollback")
+]);
 const REQUIRED_BACKUP_TABLES = ["users", "videos", "modules", "payment_requests", "posts", "help_requests"];
 
 fs.mkdirSync(uploadDir, { recursive: true });
@@ -2053,6 +2082,7 @@ app.get(["/admin/backup/export", "/learn/admin/backup/export"], requireAdmin, as
     return res.status(404).send("Database file not found on server.");
   }
 
+  const adminRoot = getAdminRootPath(req);
   let exportZipPath = "";
   try {
     const generated = await createManualExportZip();
@@ -2070,7 +2100,7 @@ app.get(["/admin/backup/export", "/learn/admin/backup/export"], requireAdmin, as
     if (exportZipPath && fs.existsSync(exportZipPath)) {
       fs.unlinkSync(exportZipPath);
     }
-    return res.status(500).send("Backup export failed.");
+    return res.redirect(`${adminRoot}?warning=${encodeURIComponent(`Backup export failed: ${err.message || "unknown error"}`)}`);
   }
 });
 
