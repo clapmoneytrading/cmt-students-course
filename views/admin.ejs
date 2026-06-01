@@ -29,6 +29,30 @@
     </header>
 
     <main class="container admin-grid">
+      <% if (message === 'backup_imported') { %>
+        <section class="card">
+          <div class="success">Database backup imported successfully.</div>
+        </section>
+      <% } %>
+      <% if (warning) { %>
+        <section class="card">
+          <div class="alert"><%= warning %></div>
+        </section>
+      <% } %>
+
+      <section class="card">
+        <h2>Database Backup</h2>
+        <p class="muted">Export full SQLite backup and import when needed.</p>
+        <div class="topbar-actions section-actions">
+          <a href="/admin/backup/export" class="btn-link">Export DB Backup</a>
+        </div>
+        <form method="post" action="/admin/backup/import" enctype="multipart/form-data" class="form-grid module-form">
+          <label>Import Backup File (.sqlite/.db)</label>
+          <input type="file" name="backup_file" accept=".sqlite,.db,application/x-sqlite3" required />
+          <button type="submit">Import Backup</button>
+        </form>
+      </section>
+
       <section class="card stat-grid">
         <article class="stat-card">
           <h3>Total Students</h3>

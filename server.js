@@ -51,15 +51,30 @@ const FREE_TOPICS = [
 ];
 
 const rootDir = __dirname;
-const dbPath = process.env.DB_PATH
+const fallbackDbPath = path.join(rootDir, "database.sqlite");
+const configuredDbPath = process.env.DB_PATH
   ? path.resolve(process.env.DB_PATH)
-  : path.join(rootDir, "database.sqlite");
-fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+  : fallbackDbPath;
+let dbPath = configuredDbPath;
+try {
+  fs.mkdirSync(path.dirname(configuredDbPath), { recursive: true });
+} catch (e) {
+  if (process.env.DB_PATH) {
+    console.error(`Configured DB_PATH is not writable: ${configuredDbPath}. Falling back to local database.`);
+    console.error(e.message || e);
+    dbPath = fallbackDbPath;
+    fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+  } else {
+    throw e;
+  }
+}
 const uploadDir = path.join(rootDir, "uploads", "videos");
 const paymentProofDir = path.join(rootDir, "uploads", "payments");
+const backupTempDir = path.join(rootDir, "uploads", "tmp");
 
 fs.mkdirSync(uploadDir, { recursive: true });
 fs.mkdirSync(paymentProofDir, { recursive: true });
+fs.mkdirSync(backupTempDir, { recursive: true });
 
 const db = new Database(dbPath);
 db.pragma("journal_mode = WAL");
@@ -421,6 +436,20 @@ const uploadPaymentProof = multer({
   }
 });
 
+const uploadBackupDb = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 200 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    const filename = (file.originalname || "").toLowerCase();
+    const mime = (file.mimetype || "").toLowerCase();
+    const looksLikeSqlite = filename.endsWith(".sqlite") || filename.endsWith(".db") || mime.includes("sqlite");
+    if (!looksLikeSqlite) {
+      return cb(new Error("Upload a valid SQLite backup file (.sqlite or .db)."));
+    }
+    cb(null, true);
+  }
+});
+
 function requireAuth(req, res, next) {
   if (!req.session.user) {
     return res.redirect("/login");
@@ -688,6 +717,50 @@ function csvEscape(v) {
     return `"${s.replace(/"/g, '""')}"`;
   }
   return s;
+}
+
+function quoteIdentifier(name) {
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
+    throw new Error(`Invalid table identifier: ${name}`);
+  }
+  return `"${name}"`;
+}
+
+function restoreDatabaseFromSqliteFile(sourcePath) {
+  db.exec("PRAGMA foreign_keys = OFF");
+  let attached = false;
+  try {
+    db.prepare("ATTACH DATABASE ? AS restore_src").run(sourcePath);
+    attached = true;
+
+    const mainTables = new Set(
+      db
+        .prepare("SELECT name FROM main.sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'")
+        .all()
+        .map((r) => r.name)
+    );
+
+    const restoreTables = db
+      .prepare("SELECT name FROM restore_src.sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'")
+      .all()
+      .map((r) => r.name)
+      .filter((name) => mainTables.has(name));
+
+    const tx = db.transaction(() => {
+      for (const tableName of restoreTables) {
+        const q = quoteIdentifier(tableName);
+        db.exec(`DELETE FROM main.${q}`);
+        db.exec(`INSERT INTO main.${q} SELECT * FROM restore_src.${q}`);
+      }
+    });
+
+    tx();
+  } finally {
+    if (attached) {
+      db.prepare("DETACH DATABASE restore_src").run();
+    }
+    db.exec("PRAGMA foreign_keys = ON");
+  }
 }
 
 function getStudentProgressRows(filters = {}) {
@@ -1780,7 +1853,47 @@ app.get("/admin", requireAdmin, (req, res) => {
     recentActivity,
     leads,
     summary,
-    postSummary
+    postSummary,
+    message: req.query.message || null,
+    warning: req.query.warning || null
+  });
+});
+
+app.get("/admin/backup/export", requireAdmin, (req, res) => {
+  if (!fs.existsSync(dbPath)) {
+    return res.status(404).send("Database file not found on server.");
+  }
+
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const fileName = `cmt-backup-${stamp}.sqlite`;
+  return res.download(dbPath, fileName);
+});
+
+app.post("/admin/backup/import", requireAdmin, (req, res) => {
+  uploadBackupDb.single("backup_file")(req, res, (err) => {
+    if (err) {
+      return res.redirect(`/admin?warning=${encodeURIComponent(err.message || "Backup upload failed")}`);
+    }
+
+    if (!req.file || !req.file.buffer || !req.file.buffer.length) {
+      return res.redirect(`/admin?warning=${encodeURIComponent("Backup file is required")}`);
+    }
+
+    const tempName = `restore-${Date.now()}-${Math.round(Math.random() * 1e9)}.sqlite`;
+    const tempPath = path.join(backupTempDir, tempName);
+
+    try {
+      fs.writeFileSync(tempPath, req.file.buffer);
+      restoreDatabaseFromSqliteFile(tempPath);
+      return res.redirect("/admin?message=backup_imported");
+    } catch (e) {
+      console.error("Backup import failed", e);
+      return res.redirect(`/admin?warning=${encodeURIComponent("Backup import failed. Ensure backup is from same app version.")}`);
+    } finally {
+      if (fs.existsSync(tempPath)) {
+        fs.unlinkSync(tempPath);
+      }
+    }
   });
 });
 
