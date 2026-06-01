@@ -968,7 +968,8 @@ async function restoreFromZipBackup(zipPath, options = {}) {
       const hasUploadsDir = fs.existsSync(uploadsRoot) && fs.statSync(uploadsRoot).isDirectory();
       const hasVideosDir = fs.existsSync(sourceVideoDir) && fs.statSync(sourceVideoDir).isDirectory();
       const hasPaymentsDir = fs.existsSync(sourcePaymentDir) && fs.statSync(sourcePaymentDir).isDirectory();
-      if (!hasUploadsDir || !hasVideosDir || !hasPaymentsDir) {
+      // Some valid backups may not contain uploads when no files were ever uploaded.
+      if (hasUploadsDir && !hasVideosDir && !hasPaymentsDir) {
         throw new Error("ZIP backup folder structure is invalid. Required: uploads/videos and uploads/payments");
       }
     }
@@ -2144,7 +2145,7 @@ app.post(["/admin/backup/import", "/learn/admin/backup/import"], requireAdmin, (
       fs.writeFileSync(tempPath, req.file.buffer);
 
       if (isZipBackup) {
-        await restoreFromZipBackup(tempPath, { validateOnly: true, requireFolderStructure: true });
+        await restoreFromZipBackup(tempPath, { validateOnly: true, requireFolderStructure: false });
       } else {
         assertSqliteBackupIntegrity(tempPath);
       }
@@ -2152,7 +2153,7 @@ app.post(["/admin/backup/import", "/learn/admin/backup/import"], requireAdmin, (
       rollbackSnapshotPath = await createRollbackSnapshotZip();
 
       if (isZipBackup) {
-        await restoreFromZipBackup(tempPath, { requireFolderStructure: true });
+        await restoreFromZipBackup(tempPath, { requireFolderStructure: false });
       } else {
         restoreDatabaseFromSqliteFile(tempPath);
       }
@@ -2163,16 +2164,17 @@ app.post(["/admin/backup/import", "/learn/admin/backup/import"], requireAdmin, (
 
       if (rollbackSnapshotPath && fs.existsSync(rollbackSnapshotPath)) {
         try {
-          await restoreFromZipBackup(rollbackSnapshotPath, { requireFolderStructure: true });
+          await restoreFromZipBackup(rollbackSnapshotPath, { requireFolderStructure: false });
           rollbackRestored = true;
         } catch (rollbackError) {
           console.error("Rollback restore failed", rollbackError);
         }
       }
 
+      const errorText = e && e.message ? ` (${e.message})` : "";
       const warningMessage = rollbackRestored
-        ? "Backup import failed. Previous data restored from rollback snapshot."
-        : "Backup import failed. Ensure backup format/schema is valid.";
+        ? `Backup import failed. Previous data restored from rollback snapshot.${errorText}`
+        : `Backup import failed. Ensure backup format/schema is valid.${errorText}`;
 
       return res.redirect(`${adminRoot}?warning=${encodeURIComponent(warningMessage)}`);
     } finally {
