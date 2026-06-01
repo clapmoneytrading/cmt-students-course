@@ -992,112 +992,25 @@ app.post("/register", async (req, res) => {
   }
 
   const hash = bcrypt.hashSync(password, 10);
-  const result = db
+  db
     .prepare(
-      "INSERT INTO users (name, email, phone, password_hash, is_admin, has_paid_access, email_verified) VALUES (?, ?, ?, ?, 0, 0, 0)"
+      "INSERT INTO users (name, email, phone, password_hash, is_admin, has_paid_access, email_verified) VALUES (?, ?, ?, ?, 0, 0, 1)"
     )
     .run(name, email, phone, hash);
 
-  const token = makeToken();
-  db.prepare("INSERT INTO email_verification_tokens (user_id, token, expires_at) VALUES (?, ?, ?)").run(
-    result.lastInsertRowid,
-    token,
-    makeExpiry(24)
-  );
-
-  const otpCode = makeOtpCode();
-  db.prepare("INSERT INTO email_otp_codes (user_id, otp_code, expires_at) VALUES (?, ?, ?)").run(
-    result.lastInsertRowid,
-    otpCode,
-    makeExpiry(OTP_EXPIRY_MINUTES / 60)
-  );
-
-  try {
-    await Promise.all([sendVerificationEmail(email, token), sendOtpEmail(email, otpCode)]);
-    return res.redirect(`/verify-otp?email=${encodeURIComponent(email)}&message=otp_sent`);
-  } catch (e) {
-    console.error("Failed to send registration emails", e);
-    return res.redirect(`/verify-otp?email=${encodeURIComponent(email)}&message=otp_failed`);
-  }
+  return res.redirect("/login?message=register_success");
 });
 
 app.get("/verify-otp", (req, res) => {
-  const email = (req.query.email || "").trim().toLowerCase();
-  res.render("verify-otp", {
-    email,
-    error: null,
-    message: req.query.message || null,
-    freeGroupUrl: WHATSAPP_GROUP_FREE_URL
-  });
+  return res.redirect("/login?message=otp_disabled");
 });
 
 app.post("/verify-otp", async (req, res) => {
-  const email = (req.body.email || "").trim().toLowerCase();
-  const otpCode = String(req.body.otp_code || "").replace(/\s+/g, "").trim();
-
-  const user = db.prepare("SELECT id, name, email, email_verified FROM users WHERE email = ?").get(email);
-  if (!user) {
-    return res.status(400).render("verify-otp", { email, error: "Invalid email.", message: null, freeGroupUrl: WHATSAPP_GROUP_FREE_URL });
-  }
-
-  if (user.email_verified) {
-    return res.redirect("/login?message=verify_success");
-  }
-
-  const row = db
-    .prepare(
-      "SELECT id FROM email_otp_codes WHERE user_id = ? AND otp_code = ? AND used_at IS NULL AND datetime(expires_at) >= datetime('now') ORDER BY id DESC LIMIT 1"
-    )
-    .get(user.id, otpCode);
-
-  if (!row) {
-    return res.status(400).render("verify-otp", {
-      email,
-      error: "OTP is invalid or expired.",
-      message: null,
-      freeGroupUrl: WHATSAPP_GROUP_FREE_URL
-    });
-  }
-
-  const tx = db.transaction(() => {
-    db.prepare("UPDATE users SET email_verified = 1 WHERE id = ?").run(user.id);
-    db.prepare("UPDATE email_otp_codes SET used_at = CURRENT_TIMESTAMP WHERE id = ?").run(row.id);
-  });
-  tx();
-
-  try {
-    await sendWelcomeEmail(user.name, user.email);
-    await sendGroupInviteEmail(user.name, user.email, false);
-  } catch (e) {
-    console.error("Failed to send welcome email", e);
-  }
-
-  return res.redirect("/login?message=verify_success");
+  return res.redirect("/login?message=otp_disabled");
 });
 
 app.post("/verify-otp/resend", async (req, res) => {
-  const email = (req.body.email || "").trim().toLowerCase();
-  const user = db.prepare("SELECT id, email_verified FROM users WHERE email = ?").get(email);
-  if (!user || user.email_verified) {
-    return res.redirect(`/verify-otp?email=${encodeURIComponent(email)}&message=otp_sent`);
-  }
-
-  db.prepare("UPDATE email_otp_codes SET used_at = CURRENT_TIMESTAMP WHERE user_id = ? AND used_at IS NULL").run(user.id);
-
-  const otpCode = makeOtpCode();
-  db.prepare("INSERT INTO email_otp_codes (user_id, otp_code, expires_at) VALUES (?, ?, ?)").run(
-    user.id,
-    otpCode,
-    makeExpiry(OTP_EXPIRY_MINUTES / 60)
-  );
-
-  try {
-    await sendOtpEmail(email, otpCode);
-    return res.redirect(`/verify-otp?email=${encodeURIComponent(email)}&message=otp_sent`);
-  } catch (e) {
-    console.error("Failed to resend OTP", e);
-    return res.redirect(`/verify-otp?email=${encodeURIComponent(email)}&message=otp_failed`);
-  }
+  return res.redirect("/login?message=otp_disabled");
 });
 
 app.get("/login", (req, res) => {
@@ -1119,13 +1032,6 @@ app.post("/login", (req, res) => {
   const ok = bcrypt.compareSync(password, user.password_hash);
   if (!ok) {
     return res.status(400).render("login", { error: "Invalid email or password.", message: null });
-  }
-
-  if (!user.email_verified && !user.is_admin) {
-    return res.status(403).render("login", {
-      error: "Please verify your email before login.",
-      message: null
-    });
   }
 
   req.session.user = {

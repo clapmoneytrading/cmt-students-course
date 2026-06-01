@@ -17,17 +17,11 @@
         <h1>Student Login</h1>
         <p class="muted">Login to access your free and paid courses.</p>
 
-        <% if (message === 'verify_email_sent') { %>
-          <div class="alert success">Verification details sent. Please verify before login.</div>
+        <% if (message === 'register_success') { %>
+          <div class="alert success">Registration successful. You can login now.</div>
         <% } %>
-        <% if (message === 'otp_sent') { %>
-          <div class="alert success">OTP sent. Please check your email and verify.</div>
-        <% } %>
-        <% if (message === 'verify_success') { %>
-          <div class="alert success">Email verified successfully. You can login now.</div>
-        <% } %>
-        <% if (message === 'verify_invalid') { %>
-          <div class="alert">Verification link is invalid or expired.</div>
+        <% if (message === 'otp_disabled') { %>
+          <div class="alert">OTP verification is disabled. Please login with your email and password.</div>
         <% } %>
         <% if (message === 'reset_success') { %>
           <div class="alert success">Password reset complete. Please login.</div>
