@@ -733,7 +733,8 @@ td {
   margin-bottom: 10px;
 }
 
-.backup-export-btn {
+.section-actions .backup-export-btn,
+.topbar-actions .backup-export-btn {
   background: linear-gradient(135deg, #0b7a5a 0%, #0d9a73 100%);
   border: 1px solid #086248;
   color: #ffffff;
@@ -741,7 +742,8 @@ td {
   box-shadow: 0 8px 18px rgba(11, 122, 90, 0.28);
 }
 
-.backup-export-btn:hover {
+.section-actions .backup-export-btn:hover,
+.topbar-actions .backup-export-btn:hover {
   background: linear-gradient(135deg, #0a6a4f 0%, #0c8a67 100%);
 }
 

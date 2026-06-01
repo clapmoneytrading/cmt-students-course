@@ -824,10 +824,7 @@ function appendBackupArchiveContents(archive, meta = {}) {
   );
 }
 
-function createRollbackSnapshotZip() {
-  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-  const filePath = path.join(rollbackSnapshotDir, `rollback-${stamp}.zip`);
-
+function createBackupZipToPath(filePath, meta = {}) {
   return new Promise((resolve, reject) => {
     const output = fs.createWriteStream(filePath);
     const archive = archiver("zip", { zlib: { level: 9 } });
@@ -837,11 +834,30 @@ function createRollbackSnapshotZip() {
     archive.on("error", reject);
 
     archive.pipe(output);
-    appendBackupArchiveContents(archive, {
-      backup_type: "rollback_snapshot",
-      purpose: "auto-created before import restore"
-    });
+    appendBackupArchiveContents(archive, meta);
     archive.finalize();
+  });
+}
+
+function createRollbackSnapshotZip() {
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const filePath = path.join(rollbackSnapshotDir, `rollback-${stamp}.zip`);
+
+  return createBackupZipToPath(filePath, {
+    backup_type: "rollback_snapshot",
+    purpose: "auto-created before import restore"
+  });
+}
+
+function createManualExportZip() {
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const fileName = `cmt-full-backup-${stamp}.zip`;
+  const filePath = path.join(backupTempDir, fileName);
+
+  return new Promise((resolve, reject) => {
+    createBackupZipToPath(filePath, { backup_type: "manual_export" })
+      .then(() => resolve({ filePath, fileName }))
+      .catch(reject);
   });
 }
 
@@ -2032,30 +2048,30 @@ function getAdminRootPath(req) {
   return req.path.startsWith("/learn/") ? "/learn/admin" : "/admin";
 }
 
-app.get(["/admin/backup/export", "/learn/admin/backup/export"], requireAdmin, (req, res) => {
+app.get(["/admin/backup/export", "/learn/admin/backup/export"], requireAdmin, async (req, res) => {
   if (!fs.existsSync(dbPath)) {
     return res.status(404).send("Database file not found on server.");
   }
 
-  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-  const fileName = `cmt-full-backup-${stamp}.zip`;
-
-  res.attachment(fileName);
-  const archive = archiver("zip", { zlib: { level: 9 } });
-
-  archive.on("error", (err) => {
+  let exportZipPath = "";
+  try {
+    const generated = await createManualExportZip();
+    exportZipPath = generated.filePath;
+    return res.download(generated.filePath, generated.fileName, (err) => {
+      if (fs.existsSync(generated.filePath)) {
+        fs.unlinkSync(generated.filePath);
+      }
+      if (err && !res.headersSent) {
+        res.status(500).send("Backup export download failed.");
+      }
+    });
+  } catch (err) {
     console.error("Backup export failed", err);
-    if (!res.headersSent) {
-      res.status(500).send("Backup export failed.");
-    } else {
-      res.end();
+    if (exportZipPath && fs.existsSync(exportZipPath)) {
+      fs.unlinkSync(exportZipPath);
     }
-  });
-
-  archive.pipe(res);
-  appendBackupArchiveContents(archive, { backup_type: "manual_export" });
-
-  archive.finalize();
+    return res.status(500).send("Backup export failed.");
+  }
 });
 
 app.post(["/admin/backup/import", "/learn/admin/backup/import"], requireAdmin, (req, res) => {
