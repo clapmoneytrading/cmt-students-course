@@ -82,14 +82,6 @@
         <% } %>
       </section>
 
-      <% if (!currentUser.has_paid_access) { %>
-        <section class="card callout">
-          <h2>Unlock Paid Modules</h2>
-          <p class="muted">Choose specific paid module (or full course), pay using QR, and submit proof.</p>
-          <a href="/pay" class="btn-link">Pay for Module / Full Course</a>
-        </section>
-      <% } %>
-
       <% if (freeGroupUrl || (currentUser.has_paid_access && paidGroupUrl)) { %>
         <section class="card callout">
           <h2>WhatsApp Learning Groups</h2>
