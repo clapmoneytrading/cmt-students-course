@@ -12,8 +12,8 @@
       <div class="brand">
         <img src="/logo.svg" alt="Clap Money Trading" class="brand-logo" />
         <div>
-          <h1 class="brand-title">Pay for Paid Course</h1>
-          <p class="brand-subtitle">Scan QR, pay on phone, submit proof</p>
+          <h1 class="brand-title">Pay for Access</h1>
+          <p class="brand-subtitle">Choose module or full course, pay, then submit proof</p>
         </div>
       </div>
       <div class="topbar-actions">
@@ -27,7 +27,8 @@
         <p class="muted">Use any UPI app or payment app on your phone to pay.</p>
 
         <p class="price-line">
-          Course Price: <strong><%= payment.coursePrice.toFixed(2) %></strong>
+          Target: <strong><%= payment.targetLabel %></strong><br />
+          Price: <strong><%= payment.coursePrice.toFixed(2) %></strong>
         </p>
 
         <div class="qr-wrap">
@@ -59,6 +60,20 @@
         <% } %>
 
         <form method="post" action="/pay" enctype="multipart/form-data" class="form-grid">
+          <label>Select Paid Module (or Full Course)</label>
+          <select name="module_id">
+            <option value="">Full Course Access</option>
+            <% payment.availablePaidModules.forEach((module) => { %>
+              <option
+                value="<%= module.id %>"
+                <%= payment.targetModuleId === module.id ? 'selected' : '' %>
+                <%= module.unlocked ? 'disabled' : '' %>
+              >
+                <%= module.title %> - <%= Number(module.price_amount || 0).toFixed(2) %><%= module.unlocked ? ' (Already Unlocked)' : '' %>
+              </option>
+            <% }) %>
+          </select>
+
           <label>Promo Code (optional)</label>
           <input type="text" name="promo_code" placeholder="Example: CMT10" />
 
@@ -85,6 +100,7 @@
               <thead>
                 <tr>
                   <th>Date</th>
+                  <th>Target</th>
                   <th>Promo</th>
                   <th>Discount</th>
                   <th>Expected</th>
@@ -98,6 +114,7 @@
                 <% requests.forEach((row) => { %>
                   <tr>
                     <td><%= row.created_at %></td>
+                    <td><%= row.module_id ? (row.module_title || ('Module #' + row.module_id)) : 'Full Course' %></td>
                     <td><%= row.promo_code || '-' %></td>
                     <td><%= Number(row.discount_amount || 0).toFixed(2) %></td>
                     <td><%= Number(row.expected_amount || 0).toFixed(2) %></td>

@@ -99,6 +99,9 @@
             <option value="paid">Paid</option>
           </select>
 
+          <label>Module Price</label>
+          <input type="number" name="price_amount" min="0" step="0.01" value="0" />
+
           <label>Roadmap Level</label>
           <select name="level" required>
             <option value="beginner">Beginner</option>
@@ -121,6 +124,7 @@
                 <tr>
                   <th>Title</th>
                   <th>Access</th>
+                  <th>Price</th>
                   <th>Level</th>
                   <th>Order</th>
                   <th>Actions</th>
@@ -138,6 +142,7 @@
                         <%= module.access_type.toUpperCase() %>
                       </span>
                     </td>
+                    <td><%= module.access_type === 'paid' ? Number(module.price_amount || 0).toFixed(2) : '-' %></td>
                     <td><%= (module.level || 'beginner').toUpperCase() %></td>
                     <td><%= module.sort_order %></td>
                     <td>
@@ -357,6 +362,7 @@
               <thead>
                 <tr>
                   <th>Student</th>
+                  <th>Target</th>
                   <th>Promo</th>
                   <th>Discount</th>
                   <th>Expected</th>
@@ -371,6 +377,13 @@
                 <% payments.forEach((p) => { %>
                   <tr>
                     <td><%= p.user_name %><br /><span class="muted"><%= p.user_email %></span></td>
+                    <td>
+                      <% if (p.module_id) { %>
+                        Module: <strong><%= p.module_title || ('#' + p.module_id) %></strong>
+                      <% } else { %>
+                        Full Course
+                      <% } %>
+                    </td>
                     <td><%= p.promo_code || '-' %></td>
                     <td><%= Number(p.discount_amount || 0).toFixed(2) %></td>
                     <td><%= Number(p.expected_amount || 0).toFixed(2) %></td>
@@ -392,7 +405,7 @@
                       <% if (p.status === 'pending') { %>
                         <form method="post" action="/admin/payments/<%= p.id %>/approve" class="form-grid compact">
                           <input type="text" name="admin_note" placeholder="Optional note" />
-                          <button type="submit">Approve + Grant Access</button>
+                          <button type="submit">Approve + Grant Target Access</button>
                         </form>
                         <form method="post" action="/admin/payments/<%= p.id %>/reject" class="form-grid compact">
                           <input type="text" name="admin_note" placeholder="Reason for reject" />

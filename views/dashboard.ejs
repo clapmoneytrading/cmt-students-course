@@ -84,9 +84,9 @@
 
       <% if (!currentUser.has_paid_access) { %>
         <section class="card callout">
-          <h2>Unlock Paid Course</h2>
-          <p class="muted">Pay by scanning QR code with your phone and submit payment proof.</p>
-          <a href="/pay" class="btn-link">Pay and Upgrade</a>
+          <h2>Unlock Paid Modules</h2>
+          <p class="muted">Choose specific paid module (or full course), pay using QR, and submit proof.</p>
+          <a href="/pay" class="btn-link">Pay for Module / Full Course</a>
         </section>
       <% } %>
 
@@ -162,7 +162,13 @@
                     </div>
                   </div>
                   <% if (module.locked) { %>
-                    <p class="locked-note">This module is locked. Upgrade to paid access.</p>
+                    <p class="locked-note">
+                      This module is locked.
+                      <% if (module.access_type === 'paid') { %>
+                        Price: <strong><%= Number(module.price_amount || 0).toFixed(2) %></strong>.
+                        <a href="/pay?module_id=<%= module.id %>" class="btn-link">Unlock This Module</a>
+                      <% } %>
+                    </p>
                   <% } else if (!module.lessons.length) { %>
                     <p class="muted">No lessons in this module yet.</p>
                   <% } else { %>

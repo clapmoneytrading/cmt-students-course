@@ -158,9 +158,24 @@ function initDatabase() {
       title TEXT NOT NULL,
       description TEXT DEFAULT '',
       access_type TEXT CHECK(access_type IN ('free', 'paid')) NOT NULL DEFAULT 'free',
+      price_amount REAL NOT NULL DEFAULT 0,
       sort_order INTEGER NOT NULL DEFAULT 0,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
+
+    CREATE TABLE IF NOT EXISTS user_module_access (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      module_id INTEGER NOT NULL,
+      granted_by_payment_id INTEGER,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES users(id),
+      FOREIGN KEY (module_id) REFERENCES modules(id),
+      FOREIGN KEY (granted_by_payment_id) REFERENCES payment_requests(id)
+    );
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_user_module_access_unique
+      ON user_module_access (user_id, module_id);
 
     CREATE TABLE IF NOT EXISTS video_progress (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -180,6 +195,7 @@ function initDatabase() {
     CREATE TABLE IF NOT EXISTS payment_requests (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       user_id INTEGER NOT NULL,
+      module_id INTEGER,
       amount REAL NOT NULL,
       transaction_ref TEXT DEFAULT '',
       screenshot_filename TEXT DEFAULT '',
@@ -190,7 +206,8 @@ function initDatabase() {
       admin_note TEXT DEFAULT '',
       created_at TEXT DEFAULT CURRENT_TIMESTAMP,
       reviewed_at TEXT,
-      FOREIGN KEY (user_id) REFERENCES users(id)
+      FOREIGN KEY (user_id) REFERENCES users(id),
+      FOREIGN KEY (module_id) REFERENCES modules(id)
     );
 
     CREATE TABLE IF NOT EXISTS email_verification_tokens (
@@ -353,9 +370,14 @@ function initDatabase() {
 
   const moduleColumns = db.prepare("PRAGMA table_info(modules)").all();
   const hasModuleLevel = moduleColumns.some((c) => c.name === "level");
+  const hasModulePriceAmount = moduleColumns.some((c) => c.name === "price_amount");
   if (!hasModuleLevel) {
     db.exec("ALTER TABLE modules ADD COLUMN level TEXT CHECK(level IN ('beginner', 'intermediate', 'advanced')) NOT NULL DEFAULT 'beginner'");
   }
+  if (!hasModulePriceAmount) {
+    db.exec("ALTER TABLE modules ADD COLUMN price_amount REAL NOT NULL DEFAULT 0");
+  }
+  db.exec("UPDATE modules SET price_amount = 0 WHERE price_amount IS NULL OR price_amount < 0");
 
   const userColumns = db.prepare("PRAGMA table_info(users)").all();
   const hasEmailVerified = userColumns.some((c) => c.name === "email_verified");
@@ -378,6 +400,7 @@ function initDatabase() {
   const hasPromoCode = paymentColumns.some((c) => c.name === "promo_code");
   const hasDiscountAmount = paymentColumns.some((c) => c.name === "discount_amount");
   const hasExpectedAmount = paymentColumns.some((c) => c.name === "expected_amount");
+  const hasModulePaymentId = paymentColumns.some((c) => c.name === "module_id");
 
   if (!hasPromoCode) {
     db.exec("ALTER TABLE payment_requests ADD COLUMN promo_code TEXT DEFAULT ''");
@@ -389,6 +412,10 @@ function initDatabase() {
 
   if (!hasExpectedAmount) {
     db.exec("ALTER TABLE payment_requests ADD COLUMN expected_amount REAL NOT NULL DEFAULT 0");
+  }
+
+  if (!hasModulePaymentId) {
+    db.exec("ALTER TABLE payment_requests ADD COLUMN module_id INTEGER");
   }
 }
 
@@ -1089,11 +1116,19 @@ function getStudentProgressRows(filters = {}) {
 
 function getModules() {
   return db
-    .prepare("SELECT id, title, description, access_type, level, sort_order, created_at FROM modules ORDER BY sort_order ASC, created_at ASC")
+    .prepare("SELECT id, title, description, access_type, level, price_amount, sort_order, created_at FROM modules ORDER BY sort_order ASC, created_at ASC")
     .all();
 }
 
-function buildCourseModules(user) {
+function getUserModuleAccessSet(userId) {
+  const rows = db
+    .prepare("SELECT module_id FROM user_module_access WHERE user_id = ?")
+    .all(userId);
+  return new Set(rows.map((r) => r.module_id));
+}
+
+function buildCourseModules(user, moduleAccessSet = null) {
+  const accessSet = moduleAccessSet || getUserModuleAccessSet(user.id);
   const modules = getModules();
   const videos = db
     .prepare(
@@ -1106,8 +1141,9 @@ function buildCourseModules(user) {
     title: module.title,
     description: module.description,
     access_type: module.access_type,
+    price_amount: Number(module.price_amount || 0),
     level: module.level,
-    locked: module.access_type === "paid" && !user.has_paid_access && !user.is_admin,
+    locked: module.access_type === "paid" && !user.has_paid_access && !user.is_admin && !accessSet.has(module.id),
     lessons: []
   }));
 
@@ -1124,12 +1160,13 @@ function buildCourseModules(user) {
   };
 
   videos.forEach((video) => {
-    const moduleLocked = video.module_access_type === "paid" && !user.has_paid_access && !user.is_admin;
+    const hasModuleAccess = video.module_id && accessSet.has(video.module_id);
+    const moduleLocked = video.module_access_type === "paid" && !user.has_paid_access && !user.is_admin && !hasModuleAccess;
     if (moduleLocked) {
       return;
     }
 
-    const canWatchVideo = user.is_admin || user.has_paid_access || video.access_type === "free";
+    const canWatchVideo = user.is_admin || user.has_paid_access || hasModuleAccess || video.access_type === "free";
     if (!canWatchVideo) {
       return;
     }
@@ -1153,8 +1190,8 @@ function buildCourseModules(user) {
   return visibleModules;
 }
 
-function getCompletionSnapshot(user) {
-  const modules = buildCourseModules(user);
+function getCompletionSnapshot(user, moduleAccessSet = null) {
+  const modules = buildCourseModules(user, moduleAccessSet || getUserModuleAccessSet(user.id));
   const allVisibleLessons = modules
     .filter((m) => !m.locked)
     .flatMap((m) => m.lessons)
@@ -1537,7 +1574,8 @@ app.get("/dashboard", requireAuth, (req, res) => {
   refreshSessionUser(req, req.session.user.id);
 
   const user = req.session.user;
-  const modules = buildCourseModules(user);
+  const moduleAccessSet = getUserModuleAccessSet(user.id);
+  const modules = buildCourseModules(user, moduleAccessSet);
   const progressRows = db
     .prepare(
       "SELECT video_id, progress_seconds, duration_seconds, completed, updated_at FROM video_progress WHERE user_id = ?"
@@ -1597,7 +1635,7 @@ app.get("/dashboard", requireAuth, (req, res) => {
   ).sort();
 
   const levelOptions = ["beginner", "intermediate", "advanced"];
-  const snapshot = getCompletionSnapshot(user);
+  const snapshot = getCompletionSnapshot(user, moduleAccessSet);
 
   let certTokenRow = db.prepare("SELECT token FROM certificate_tokens WHERE user_id = ? ORDER BY created_at DESC LIMIT 1").get(user.id);
   if (snapshot.totalLessons > 0 && snapshot.completedLessons === snapshot.totalLessons && !certTokenRow) {
@@ -1689,15 +1727,17 @@ app.post("/api/favorites/:videoId", requireAuth, (req, res) => {
   }
 
   const video = db
-    .prepare("SELECT v.id, v.access_type, m.access_type AS module_access_type FROM videos v LEFT JOIN modules m ON m.id = v.module_id WHERE v.id = ?")
+    .prepare("SELECT v.id, v.module_id, v.access_type, m.access_type AS module_access_type FROM videos v LEFT JOIN modules m ON m.id = v.module_id WHERE v.id = ?")
     .get(videoId);
 
   if (!video) {
     return res.status(404).json({ error: "Video not found." });
   }
 
-  const moduleLocked = video.module_access_type === "paid" && !req.session.user.has_paid_access && !req.session.user.is_admin;
-  const canWatch = req.session.user.is_admin || req.session.user.has_paid_access || video.access_type === "free";
+  const moduleAccessSet = getUserModuleAccessSet(req.session.user.id);
+  const hasModuleAccess = video.module_id && moduleAccessSet.has(video.module_id);
+  const moduleLocked = video.module_access_type === "paid" && !req.session.user.has_paid_access && !req.session.user.is_admin && !hasModuleAccess;
+  const canWatch = req.session.user.is_admin || req.session.user.has_paid_access || hasModuleAccess || video.access_type === "free";
   if (moduleLocked || !canWatch) {
     return res.status(403).json({ error: "No access." });
   }
@@ -1796,15 +1836,17 @@ app.post("/api/progress/:videoId", requireAuth, (req, res) => {
   }
 
   const video = db
-    .prepare("SELECT v.id, v.access_type, m.access_type AS module_access_type FROM videos v LEFT JOIN modules m ON m.id = v.module_id WHERE v.id = ?")
+    .prepare("SELECT v.id, v.module_id, v.access_type, m.access_type AS module_access_type FROM videos v LEFT JOIN modules m ON m.id = v.module_id WHERE v.id = ?")
     .get(videoId);
 
   if (!video) {
     return res.status(404).json({ error: "Video not found." });
   }
 
-  const moduleLocked = video.module_access_type === "paid" && !req.session.user.has_paid_access && !req.session.user.is_admin;
-  const canWatch = req.session.user.is_admin || req.session.user.has_paid_access || video.access_type === "free";
+  const moduleAccessSet = getUserModuleAccessSet(req.session.user.id);
+  const hasModuleAccess = video.module_id && moduleAccessSet.has(video.module_id);
+  const moduleLocked = video.module_access_type === "paid" && !req.session.user.has_paid_access && !req.session.user.is_admin && !hasModuleAccess;
+  const canWatch = req.session.user.is_admin || req.session.user.has_paid_access || hasModuleAccess || video.access_type === "free";
 
   if (moduleLocked || !canWatch) {
     return res.status(403).json({ error: "No access." });
@@ -1825,50 +1867,110 @@ app.post("/api/progress/:videoId", requireAuth, (req, res) => {
   return res.json({ ok: true });
 });
 
-app.get("/pay", requireAuth, (req, res) => {
-  refreshSessionUser(req, req.session.user.id);
-
-  const requests = db
+function getPaymentRequestsForUser(userId) {
+  return db
     .prepare(
-      "SELECT id, amount, transaction_ref, screenshot_filename, promo_code, discount_amount, expected_amount, status, admin_note, created_at FROM payment_requests WHERE user_id = ? ORDER BY created_at DESC"
+      "SELECT p.id, p.module_id, p.amount, p.transaction_ref, p.screenshot_filename, p.promo_code, p.discount_amount, p.expected_amount, p.status, p.admin_note, p.created_at, m.title AS module_title FROM payment_requests p LEFT JOIN modules m ON m.id = p.module_id WHERE p.user_id = ? ORDER BY p.created_at DESC"
     )
-    .all(req.session.user.id);
+    .all(userId);
+}
 
-  res.render("pay", {
-    error: null,
-    success: null,
+function getPaymentPageContext(userId, moduleIdRaw) {
+  const requestedModuleId = Number(moduleIdRaw || 0);
+  const targetModuleId = Number.isInteger(requestedModuleId) && requestedModuleId > 0 ? requestedModuleId : null;
+  const moduleAccessSet = getUserModuleAccessSet(userId);
+
+  const selectedModule = targetModuleId
+    ? db
+        .prepare("SELECT id, title, access_type, price_amount FROM modules WHERE id = ?")
+        .get(targetModuleId)
+    : null;
+
+  const module = selectedModule && selectedModule.access_type === "paid" ? selectedModule : null;
+  const moduleAlreadyUnlocked = !!(module && moduleAccessSet.has(module.id));
+  const availablePaidModules = db
+    .prepare("SELECT id, title, access_type, price_amount FROM modules WHERE access_type = 'paid' ORDER BY sort_order ASC, created_at ASC")
+    .all()
+    .map((m) => ({
+      ...m,
+      price_amount: Math.max(0, Number(m.price_amount || 0)),
+      unlocked: moduleAccessSet.has(m.id)
+    }));
+
+  const basePrice = module ? Math.max(0, Number(module.price_amount || 0), 1) : COURSE_PRICE;
+  const targetLabel = module ? `${module.title} Module` : "Full Course Access";
+
+  return {
+    module,
+    moduleAlreadyUnlocked,
+    availablePaidModules,
+    coursePrice: basePrice,
+    targetLabel,
+    targetModuleId: module ? module.id : null
+  };
+}
+
+function renderPayPage(req, res, options = {}) {
+  const userId = req.session.user.id;
+  const context = getPaymentPageContext(userId, options.moduleIdRaw);
+  const requests = getPaymentRequestsForUser(userId);
+
+  return res.render("pay", {
+    error: options.error || null,
+    success: options.success || null,
     requests,
     payment: {
       upiId: PAYMENT_UPI_ID,
       phone: PAYMENT_PHONE,
       name: PAYMENT_NAME,
       qrImage: PAYMENT_QR_IMAGE,
-      coursePrice: COURSE_PRICE
+      coursePrice: context.coursePrice,
+      targetLabel: context.targetLabel,
+      targetModuleId: context.targetModuleId,
+      availablePaidModules: context.availablePaidModules
     },
-    promoMessage: null
+    promoMessage: options.promoMessage || null
   });
+}
+
+app.get("/pay", requireAuth, (req, res) => {
+  refreshSessionUser(req, req.session.user.id);
+  const context = getPaymentPageContext(req.session.user.id, req.query.module_id);
+
+  if (context.module && context.moduleAlreadyUnlocked) {
+    return renderPayPage(req, res, {
+      moduleIdRaw: req.query.module_id,
+      error: "This module is already unlocked for your account."
+    });
+  }
+
+  return renderPayPage(req, res, { moduleIdRaw: req.query.module_id });
 });
 
 app.post("/pay", requireAuth, (req, res) => {
   uploadPaymentProof.single("proof")(req, res, (err) => {
+    refreshSessionUser(req, req.session.user.id);
+    const moduleIdRaw = req.body.module_id || "";
+    const context = getPaymentPageContext(req.session.user.id, moduleIdRaw);
+
     if (err) {
-      const requests = db
-        .prepare(
-          "SELECT id, amount, transaction_ref, screenshot_filename, promo_code, discount_amount, expected_amount, status, admin_note, created_at FROM payment_requests WHERE user_id = ? ORDER BY created_at DESC"
-        )
-        .all(req.session.user.id);
-      return res.status(400).render("pay", {
-        error: err.message,
-        success: null,
-        requests,
-        payment: {
-          upiId: PAYMENT_UPI_ID,
-          phone: PAYMENT_PHONE,
-          name: PAYMENT_NAME,
-          qrImage: PAYMENT_QR_IMAGE,
-          coursePrice: COURSE_PRICE
-        },
-        promoMessage: null
+      return renderPayPage(req, res.status(400), {
+        moduleIdRaw,
+        error: err.message
+      });
+    }
+
+    if (moduleIdRaw && !context.module) {
+      return renderPayPage(req, res.status(400), {
+        moduleIdRaw,
+        error: "Selected paid module is invalid."
+      });
+    }
+
+    if (context.module && context.moduleAlreadyUnlocked) {
+      return renderPayPage(req, res.status(400), {
+        moduleIdRaw,
+        error: "This module is already unlocked for your account."
       });
     }
 
@@ -1878,76 +1980,35 @@ app.post("/pay", requireAuth, (req, res) => {
     const screenshotFilename = req.file ? req.file.filename : "";
 
     const promo = promoCodeInput ? getValidPromo(promoCodeInput) : null;
-    const discountAmount = calculateDiscount(COURSE_PRICE, promo);
-    const expectedAmount = Math.max(0, COURSE_PRICE - discountAmount);
+    const discountAmount = calculateDiscount(context.coursePrice, promo);
+    const expectedAmount = Math.max(0, context.coursePrice - discountAmount);
 
     if (!Number.isFinite(amount) || amount <= 0) {
-      const requests = db
-        .prepare(
-          "SELECT id, amount, transaction_ref, screenshot_filename, promo_code, discount_amount, expected_amount, status, admin_note, created_at FROM payment_requests WHERE user_id = ? ORDER BY created_at DESC"
-        )
-        .all(req.session.user.id);
-      return res.status(400).render("pay", {
-        error: "Enter a valid payment amount.",
-        success: null,
-        requests,
-        payment: {
-          upiId: PAYMENT_UPI_ID,
-          phone: PAYMENT_PHONE,
-          name: PAYMENT_NAME,
-          qrImage: PAYMENT_QR_IMAGE,
-          coursePrice: COURSE_PRICE
-        },
-        promoMessage: null
+      return renderPayPage(req, res.status(400), {
+        moduleIdRaw,
+        error: "Enter a valid payment amount."
       });
     }
 
     if (promoCodeInput && !promo) {
-      const requests = db
-        .prepare(
-          "SELECT id, amount, transaction_ref, screenshot_filename, promo_code, discount_amount, expected_amount, status, admin_note, created_at FROM payment_requests WHERE user_id = ? ORDER BY created_at DESC"
-        )
-        .all(req.session.user.id);
-      return res.status(400).render("pay", {
-        error: "Promo code is invalid or expired.",
-        success: null,
-        requests,
-        payment: {
-          upiId: PAYMENT_UPI_ID,
-          phone: PAYMENT_PHONE,
-          name: PAYMENT_NAME,
-          qrImage: PAYMENT_QR_IMAGE,
-          coursePrice: COURSE_PRICE
-        },
-        promoMessage: null
+      return renderPayPage(req, res.status(400), {
+        moduleIdRaw,
+        error: "Promo code is invalid or expired."
       });
     }
 
     if (!transactionRef && !screenshotFilename) {
-      const requests = db
-        .prepare(
-          "SELECT id, amount, transaction_ref, screenshot_filename, promo_code, discount_amount, expected_amount, status, admin_note, created_at FROM payment_requests WHERE user_id = ? ORDER BY created_at DESC"
-        )
-        .all(req.session.user.id);
-      return res.status(400).render("pay", {
-        error: "Add transaction reference or upload screenshot proof.",
-        success: null,
-        requests,
-        payment: {
-          upiId: PAYMENT_UPI_ID,
-          phone: PAYMENT_PHONE,
-          name: PAYMENT_NAME,
-          qrImage: PAYMENT_QR_IMAGE,
-          coursePrice: COURSE_PRICE
-        },
-        promoMessage: null
+      return renderPayPage(req, res.status(400), {
+        moduleIdRaw,
+        error: "Add transaction reference or upload screenshot proof."
       });
     }
 
     db.prepare(
-      "INSERT INTO payment_requests (user_id, amount, transaction_ref, screenshot_filename, promo_code, discount_amount, expected_amount, status) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')"
+      "INSERT INTO payment_requests (user_id, module_id, amount, transaction_ref, screenshot_filename, promo_code, discount_amount, expected_amount, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending')"
     ).run(
       req.session.user.id,
+      context.targetModuleId,
       amount,
       transactionRef,
       screenshotFilename,
@@ -1956,23 +2017,9 @@ app.post("/pay", requireAuth, (req, res) => {
       expectedAmount
     );
 
-    const requests = db
-      .prepare(
-        "SELECT id, amount, transaction_ref, screenshot_filename, promo_code, discount_amount, expected_amount, status, admin_note, created_at FROM payment_requests WHERE user_id = ? ORDER BY created_at DESC"
-      )
-      .all(req.session.user.id);
-
-    res.render("pay", {
-      error: null,
-      success: "Payment submitted. Admin will verify and unlock your paid course.",
-      requests,
-      payment: {
-        upiId: PAYMENT_UPI_ID,
-        phone: PAYMENT_PHONE,
-        name: PAYMENT_NAME,
-        qrImage: PAYMENT_QR_IMAGE,
-        coursePrice: COURSE_PRICE
-      },
+    return renderPayPage(req, res, {
+      moduleIdRaw,
+      success: `Payment submitted for ${context.targetLabel}. Admin will verify and unlock access.`,
       promoMessage: promo
         ? `Promo ${promo.code} applied. Discount: ${discountAmount.toFixed(2)}.`
         : null
@@ -2007,8 +2054,10 @@ app.get("/video/:id", requireAuth, (req, res) => {
     return res.status(404).send("Video not found");
   }
 
-  const moduleLocked = video.module_access_type === "paid" && !req.session.user.has_paid_access && !req.session.user.is_admin;
-  const canWatch = video.access_type === "free" || req.session.user.has_paid_access;
+  const moduleAccessSet = getUserModuleAccessSet(req.session.user.id);
+  const hasModuleAccess = video.module_id && moduleAccessSet.has(video.module_id);
+  const moduleLocked = video.module_access_type === "paid" && !req.session.user.has_paid_access && !req.session.user.is_admin && !hasModuleAccess;
+  const canWatch = video.access_type === "free" || req.session.user.has_paid_access || hasModuleAccess;
   if ((moduleLocked || !canWatch) && !req.session.user.is_admin) {
     return res.status(403).send("You do not have access to this video.");
   }
@@ -2066,7 +2115,7 @@ app.get("/admin", requireAdmin, (req, res) => {
 
   const payments = db
     .prepare(
-      `SELECT p.id, p.amount, p.transaction_ref, p.screenshot_filename, p.promo_code, p.discount_amount, p.expected_amount, p.status, p.admin_note, p.created_at, u.id as user_id, u.name as user_name, u.email as user_email FROM payment_requests p JOIN users u ON p.user_id = u.id ${
+      `SELECT p.id, p.module_id, p.amount, p.transaction_ref, p.screenshot_filename, p.promo_code, p.discount_amount, p.expected_amount, p.status, p.admin_note, p.created_at, u.id as user_id, u.name as user_name, u.email as user_email, m.title AS module_title FROM payment_requests p JOIN users u ON p.user_id = u.id LEFT JOIN modules m ON m.id = p.module_id ${
         paymentStatus === "all" ? "" : "WHERE p.status = ?"
       } ORDER BY p.created_at DESC`
     )
@@ -2425,7 +2474,7 @@ app.get("/admin/export/payments.csv", requireAdmin, (req, res) => {
     : "all";
   const rows = db
     .prepare(
-      `SELECT p.id, u.name as student_name, u.email as student_email, p.amount, p.promo_code, p.discount_amount, p.expected_amount, p.transaction_ref, p.status, p.created_at, p.reviewed_at FROM payment_requests p JOIN users u ON u.id = p.user_id ${
+      `SELECT p.id, u.name as student_name, u.email as student_email, p.module_id, m.title as module_title, p.amount, p.promo_code, p.discount_amount, p.expected_amount, p.transaction_ref, p.status, p.created_at, p.reviewed_at FROM payment_requests p JOIN users u ON u.id = p.user_id LEFT JOIN modules m ON m.id = p.module_id ${
         paymentStatus === "all" ? "" : "WHERE p.status = ?"
       } ORDER BY p.created_at DESC`
     )
@@ -2435,6 +2484,9 @@ app.get("/admin/export/payments.csv", requireAdmin, (req, res) => {
     "id",
     "student_name",
     "student_email",
+    "payment_target",
+    "module_id",
+    "module_title",
     "amount",
     "promo_code",
     "discount_amount",
@@ -2450,6 +2502,9 @@ app.get("/admin/export/payments.csv", requireAdmin, (req, res) => {
         r.id,
         r.student_name,
         r.student_email,
+        r.module_id ? "module" : "full_course",
+        r.module_id || "",
+        r.module_title || "",
         r.amount,
         r.promo_code || "",
         r.discount_amount,
@@ -2473,6 +2528,8 @@ app.post("/admin/modules", requireAdmin, (req, res) => {
   const title = (req.body.title || "").trim();
   const description = (req.body.description || "").trim();
   const accessType = req.body.access_type === "paid" ? "paid" : "free";
+  const priceAmountRaw = Number(req.body.price_amount || 0);
+  const priceAmount = accessType === "paid" ? Math.max(0, priceAmountRaw) : 0;
   const level = ["beginner", "intermediate", "advanced"].includes(req.body.level)
     ? req.body.level
     : "beginner";
@@ -2482,10 +2539,11 @@ app.post("/admin/modules", requireAdmin, (req, res) => {
     return res.status(400).send("Module title is required.");
   }
 
-  db.prepare("INSERT INTO modules (title, description, access_type, level, sort_order) VALUES (?, ?, ?, ?, ?)").run(
+  db.prepare("INSERT INTO modules (title, description, access_type, price_amount, level, sort_order) VALUES (?, ?, ?, ?, ?, ?)").run(
     title,
     description,
     accessType,
+    priceAmount,
     level,
     sortOrder
   );
@@ -2496,7 +2554,7 @@ app.post("/admin/modules", requireAdmin, (req, res) => {
 app.get("/admin/modules/:id/edit", requireAdmin, (req, res) => {
   const moduleId = Number(req.params.id);
   const module = db
-    .prepare("SELECT id, title, description, access_type, level, sort_order FROM modules WHERE id = ?")
+    .prepare("SELECT id, title, description, access_type, price_amount, level, sort_order FROM modules WHERE id = ?")
     .get(moduleId);
 
   if (!module) {
@@ -2511,13 +2569,15 @@ app.post("/admin/modules/:id/edit", requireAdmin, (req, res) => {
   const title = (req.body.title || "").trim();
   const description = (req.body.description || "").trim();
   const accessType = req.body.access_type === "paid" ? "paid" : "free";
+  const priceAmountRaw = Number(req.body.price_amount || 0);
+  const priceAmount = accessType === "paid" ? Math.max(0, priceAmountRaw) : 0;
   const level = ["beginner", "intermediate", "advanced"].includes(req.body.level)
     ? req.body.level
     : "beginner";
   const sortOrder = Number.isFinite(Number(req.body.sort_order)) ? Number(req.body.sort_order) : 0;
 
   const existing = db
-    .prepare("SELECT id, title, description, access_type, level, sort_order FROM modules WHERE id = ?")
+    .prepare("SELECT id, title, description, access_type, price_amount, level, sort_order FROM modules WHERE id = ?")
     .get(moduleId);
 
   if (!existing) {
@@ -2532,16 +2592,18 @@ app.post("/admin/modules/:id/edit", requireAdmin, (req, res) => {
         title,
         description,
         access_type: accessType,
+        price_amount: priceAmount,
         level,
         sort_order: sortOrder
       }
     });
   }
 
-  db.prepare("UPDATE modules SET title = ?, description = ?, access_type = ?, level = ?, sort_order = ? WHERE id = ?").run(
+  db.prepare("UPDATE modules SET title = ?, description = ?, access_type = ?, price_amount = ?, level = ?, sort_order = ? WHERE id = ?").run(
     title,
     description,
     accessType,
+    priceAmount,
     level,
     sortOrder,
     moduleId
@@ -2572,7 +2634,7 @@ app.post("/admin/payments/:id/approve", requireAdmin, (req, res) => {
   const adminNote = (req.body.admin_note || "").trim();
 
   const payment = db
-    .prepare("SELECT id, user_id, status FROM payment_requests WHERE id = ?")
+    .prepare("SELECT id, user_id, module_id, status FROM payment_requests WHERE id = ?")
     .get(paymentId);
 
   const student = payment
@@ -2588,7 +2650,14 @@ app.post("/admin/payments/:id/approve", requireAdmin, (req, res) => {
   }
 
   const tx = db.transaction(() => {
-    db.prepare("UPDATE users SET has_paid_access = 1 WHERE id = ?").run(payment.user_id);
+    if (payment.module_id) {
+      db.prepare(
+        "INSERT INTO user_module_access (user_id, module_id, granted_by_payment_id) VALUES (?, ?, ?) ON CONFLICT(user_id, module_id) DO UPDATE SET granted_by_payment_id = excluded.granted_by_payment_id"
+      ).run(payment.user_id, payment.module_id, payment.id);
+    } else {
+      db.prepare("UPDATE users SET has_paid_access = 1 WHERE id = ?").run(payment.user_id);
+    }
+
     db.prepare(
       "UPDATE payment_requests SET status = 'approved', admin_note = ?, reviewed_at = CURRENT_TIMESTAMP WHERE id = ?"
     ).run(adminNote, paymentId);
@@ -2604,7 +2673,7 @@ app.post("/admin/payments/:id/approve", requireAdmin, (req, res) => {
 
   tx();
 
-  if (student && !student.has_paid_access) {
+  if (student && !student.has_paid_access && !payment.module_id) {
     sendGroupInviteEmail(student.name, student.email, true).catch((e) => {
       console.error("Failed to send paid group invite", e);
     });
@@ -2717,6 +2786,7 @@ app.post("/admin/users/:id/delete", requireAdmin, (req, res) => {
     db.prepare("DELETE FROM password_reset_tokens WHERE user_id = ?").run(userId);
     db.prepare("DELETE FROM video_progress WHERE user_id = ?").run(userId);
     db.prepare("DELETE FROM user_favorites WHERE user_id = ?").run(userId);
+    db.prepare("DELETE FROM user_module_access WHERE user_id = ?").run(userId);
     db.prepare("DELETE FROM certificate_tokens WHERE user_id = ?").run(userId);
     db.prepare("DELETE FROM user_activity_logs WHERE user_id = ?").run(userId);
     db.prepare("DELETE FROM help_requests WHERE user_id = ?").run(userId);
