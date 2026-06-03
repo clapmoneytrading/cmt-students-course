@@ -2952,25 +2952,25 @@ app.post("/admin/payments/:id/approve", requireAdmin, (req, res) => {
     if (promo && promo.promo_code) {
       db.prepare("UPDATE promo_codes SET used_count = used_count + 1 WHERE code = ?").run(promo.promo_code);
     }
-
-    // Log audit action
-    const newValues = {
-      status: "approved",
-      module_id: payment.module_id,
-      has_paid_access: payment.module_id ? student.has_paid_access : 1
-    };
-    logAuditAction(
-      req.session.user.id,
-      "payment_approved",
-      "payment_requests",
-      paymentId,
-      oldValues,
-      newValues,
-      `Payment approved for ${student.email} (${payment.module_id ? "module" : "full course"}, Amount: ${payment.amount})`
-    );
   });
 
   tx();
+
+  // Log audit action after transaction
+  const newValues = {
+    status: "approved",
+    module_id: payment.module_id,
+    has_paid_access: payment.module_id ? student.has_paid_access : 1
+  };
+  logAuditAction(
+    req.session.user.id,
+    "payment_approved",
+    "payment_requests",
+    paymentId,
+    { status: payment.status, module_id: payment.module_id },
+    newValues,
+    `Payment approved for ${student.email} (${payment.module_id ? "module" : "full course"}, Amount: ${payment.amount})`
+  );
 
   if (student && !student.has_paid_access && !payment.module_id) {
     sendGroupInviteEmail(student.name, student.email, true).catch((e) => {
