@@ -326,6 +326,49 @@ function initDatabase() {
       replied_at TEXT,
       FOREIGN KEY (user_id) REFERENCES users(id)
     );
+
+    CREATE TABLE IF NOT EXISTS password_history (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      password_hash TEXT NOT NULL,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES users(id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_password_history_user_created
+      ON password_history (user_id, created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS login_attempts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      email TEXT NOT NULL,
+      success INTEGER NOT NULL DEFAULT 0,
+      ip_address TEXT DEFAULT '',
+      user_agent TEXT DEFAULT '',
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_login_attempts_email_created
+      ON login_attempts (email, created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS audit_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      admin_user_id INTEGER NOT NULL,
+      action TEXT NOT NULL,
+      entity_type TEXT NOT NULL,
+      entity_id INTEGER,
+      old_values TEXT DEFAULT '',
+      new_values TEXT DEFAULT '',
+      description TEXT DEFAULT '',
+      ip_address TEXT DEFAULT '',
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (admin_user_id) REFERENCES users(id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_audit_logs_admin_created
+      ON audit_logs (admin_user_id, created_at DESC);
+
+    CREATE INDEX IF NOT EXISTS idx_audit_logs_action_created
+      ON audit_logs (action, created_at DESC);
   `);
 
   const videoColumns = db.prepare("PRAGMA table_info(videos)").all();
@@ -383,6 +426,7 @@ function initDatabase() {
   const hasEmailVerified = userColumns.some((c) => c.name === "email_verified");
   const hasSessionVersion = userColumns.some((c) => c.name === "session_version");
   const hasPhone = userColumns.some((c) => c.name === "phone");
+  const hasLockedUntil = userColumns.some((c) => c.name === "locked_until");
 
   if (!hasPhone) {
     db.exec("ALTER TABLE users ADD COLUMN phone TEXT DEFAULT ''");
@@ -394,6 +438,10 @@ function initDatabase() {
 
   if (!hasSessionVersion) {
     db.exec("ALTER TABLE users ADD COLUMN session_version INTEGER NOT NULL DEFAULT 0");
+  }
+
+  if (!hasLockedUntil) {
+    db.exec("ALTER TABLE users ADD COLUMN locked_until TEXT");
   }
 
   const paymentColumns = db.prepare("PRAGMA table_info(payment_requests)").all();
@@ -461,7 +509,9 @@ app.use(
     saveUninitialized: false,
     cookie: {
       httpOnly: true,
-      sameSite: "lax"
+      sameSite: "lax",
+      secure: process.env.NODE_ENV === "production",
+      maxAge: 1800000  // 30 minutes session timeout
     }
   })
 );
@@ -786,6 +836,105 @@ function logUserActivity(userId, eventType, eventData = "") {
     userId,
     eventType,
     eventData
+  );
+}
+
+// Security helper functions
+function validatePasswordStrength(password) {
+  const errors = [];
+  if (!password || password.length < 8) {
+    errors.push("Password must be at least 8 characters.");
+  }
+  if (!/[A-Z]/.test(password)) {
+    errors.push("Password must contain at least one uppercase letter.");
+  }
+  if (!/[a-z]/.test(password)) {
+    errors.push("Password must contain at least one lowercase letter.");
+  }
+  if (!/[0-9]/.test(password)) {
+    errors.push("Password must contain at least one number.");
+  }
+  if (!/[!@#$%^&*]/.test(password)) {
+    errors.push("Password must contain at least one symbol (!@#$%^&*).");
+  }
+  return { isValid: errors.length === 0, errors };
+}
+
+function isPasswordHistoryReused(userId, newPasswordHash, historyLimit = 3) {
+  const previousPasswords = db
+    .prepare("SELECT password_hash FROM password_history WHERE user_id = ? ORDER BY created_at DESC LIMIT ?")
+    .all(userId, historyLimit);
+  
+  for (const row of previousPasswords) {
+    if (bcrypt.compareSync(newPasswordHash, row.password_hash)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function savePasswordToHistory(userId, passwordHash) {
+  db.prepare("INSERT INTO password_history (user_id, password_hash) VALUES (?, ?)").run(userId, passwordHash);
+  // Keep only last 5 for history
+  const old = db
+    .prepare("SELECT id FROM password_history WHERE user_id = ? ORDER BY created_at DESC LIMIT -1 OFFSET 5")
+    .all(userId);
+  if (old.length > 0) {
+    const ids = old.map((o) => o.id).join(",");
+    db.exec(`DELETE FROM password_history WHERE id IN (${ids})`);
+  }
+}
+
+function logLoginAttempt(email, success, ipAddress, userAgent) {
+  db.prepare("INSERT INTO login_attempts (email, success, ip_address, user_agent) VALUES (?, ?, ?, ?)").run(
+    email,
+    success ? 1 : 0,
+    ipAddress,
+    userAgent
+  );
+}
+
+function getRecentFailedAttempts(email, minutesBack = 15) {
+  const timestamp = new Date(Date.now() - minutesBack * 60 * 1000).toISOString();
+  return db
+    .prepare("SELECT COUNT(*) as count FROM login_attempts WHERE email = ? AND success = 0 AND created_at > ?")
+    .get(email, timestamp).count;
+}
+
+function lockAccount(userId, minutesLocked = 30) {
+  const lockedUntil = new Date(Date.now() + minutesLocked * 60 * 1000).toISOString();
+  db.prepare("UPDATE users SET locked_until = ? WHERE id = ?").run(lockedUntil, userId);
+  logAuditAction(null, "account_locked", "users", userId, {}, {}, `Account locked for ${minutesLocked} minutes`);
+}
+
+function unlockAccount(userId) {
+  db.prepare("UPDATE users SET locked_until = NULL WHERE id = ?").run(userId);
+}
+
+function isAccountLocked(userId) {
+  const user = db.prepare("SELECT locked_until FROM users WHERE id = ?").get(userId);
+  if (!user || !user.locked_until) {
+    return false;
+  }
+  const lockedUntil = new Date(user.locked_until);
+  if (lockedUntil > new Date()) {
+    return true;
+  }
+  unlockAccount(userId);
+  return false;
+}
+
+function logAuditAction(adminUserId, action, entityType, entityId, oldValues = {}, newValues = {}, description = "") {
+  db.prepare(
+    "INSERT INTO audit_logs (admin_user_id, action, entity_type, entity_id, old_values, new_values, description) VALUES (?, ?, ?, ?, ?, ?, ?)"
+  ).run(
+    adminUserId,
+    action,
+    entityType,
+    entityId,
+    JSON.stringify(oldValues),
+    JSON.stringify(newValues),
+    description
   );
 }
 
@@ -1356,8 +1505,10 @@ app.post("/register", async (req, res) => {
 
   const phone = `${countryCode}${phoneDigits}`;
 
-  if (password.length < 6) {
-    return res.status(400).render("register", { error: "Password must be at least 6 characters." });
+  // Enhanced password policy validation
+  const passwordCheck = validatePasswordStrength(password);
+  if (!passwordCheck.isValid) {
+    return res.status(400).render("register", { error: passwordCheck.errors.join(" ") });
   }
 
   const exists = db.prepare("SELECT id FROM users WHERE email = ?").get(email);
@@ -1371,6 +1522,14 @@ app.post("/register", async (req, res) => {
       "INSERT INTO users (name, email, phone, password_hash, is_admin, has_paid_access, email_verified) VALUES (?, ?, ?, ?, 0, 0, 1)"
     )
     .run(name, email, phone, hash);
+
+  // Save initial password to history
+  const newUser = db.prepare("SELECT id FROM users WHERE email = ?").get(email);
+  if (newUser) {
+    savePasswordToHistory(newUser.id, hash);
+  }
+
+  logAuditAction(null, "user_registration", "users", newUser.id, {}, { email }, "New user registered");
 
   return res.redirect("/login?message=register_success");
 });
@@ -1397,16 +1556,49 @@ app.get("/login", (req, res) => {
 app.post("/login", (req, res) => {
   const email = (req.body.email || "").trim().toLowerCase();
   const password = req.body.password || "";
+  const ipAddress = req.ip || "";
 
+  // Check if account is locked
   const user = db.prepare("SELECT * FROM users WHERE email = ?").get(email);
+  if (user && isAccountLocked(user.id)) {
+    logLoginAttempt(email, false, ipAddress, req.get("user-agent") || "");
+    return res.status(400).render("login", { 
+      error: "Account is temporarily locked due to too many failed login attempts. Please try again in 30 minutes.",
+      message: null 
+    });
+  }
+
   if (!user) {
+    logLoginAttempt(email, false, ipAddress, req.get("user-agent") || "");
     return res.status(400).render("login", { error: "Invalid email or password.", message: null });
   }
 
   const ok = bcrypt.compareSync(password, user.password_hash);
   if (!ok) {
-    return res.status(400).render("login", { error: "Invalid email or password.", message: null });
+    logLoginAttempt(email, false, ipAddress, req.get("user-agent") || "");
+    
+    // Track failed attempts
+    const failedAttempts = getRecentFailedAttempts(email, 15);
+    const LOCKOUT_THRESHOLD = 5;
+    
+    if (failedAttempts >= LOCKOUT_THRESHOLD) {
+      lockAccount(user.id, 30);
+      return res.status(400).render("login", { 
+        error: "Too many failed login attempts. Your account has been locked for 30 minutes.",
+        message: null 
+      });
+    }
+    
+    const attemptsRemaining = LOCKOUT_THRESHOLD - failedAttempts - 1;
+    return res.status(400).render("login", { 
+      error: `Invalid email or password. ${attemptsRemaining} attempts remaining before account lockout.`,
+      message: null 
+    });
   }
+
+  // Successful login - reset failed attempts and unlock
+  logLoginAttempt(email, true, ipAddress, req.get("user-agent") || "");
+  unlockAccount(user.id);
 
   req.session.user = {
     id: user.id,
@@ -1439,6 +1631,7 @@ app.post("/login", (req, res) => {
   }
 
   logUserActivity(user.id, "login", req.get("user-agent") || "");
+  logAuditAction(null, "user_login", "users", user.id, {}, {}, `User logged in from ${ipAddress}`);
 
   res.redirect("/dashboard");
 });
@@ -2718,7 +2911,7 @@ app.post("/admin/payments/:id/approve", requireAdmin, (req, res) => {
   const adminNote = (req.body.admin_note || "").trim();
 
   const payment = db
-    .prepare("SELECT id, user_id, module_id, status FROM payment_requests WHERE id = ?")
+    .prepare("SELECT id, user_id, module_id, status, amount FROM payment_requests WHERE id = ?")
     .get(paymentId);
 
   const student = payment
@@ -2734,6 +2927,12 @@ app.post("/admin/payments/:id/approve", requireAdmin, (req, res) => {
   }
 
   const tx = db.transaction(() => {
+    const oldValues = {
+      status: payment.status,
+      module_id: payment.module_id,
+      has_paid_access: student.has_paid_access
+    };
+
     if (payment.module_id) {
       db.prepare(
         "INSERT INTO user_module_access (user_id, module_id, granted_by_payment_id) VALUES (?, ?, ?) ON CONFLICT(user_id, module_id) DO UPDATE SET granted_by_payment_id = excluded.granted_by_payment_id"
@@ -2753,6 +2952,22 @@ app.post("/admin/payments/:id/approve", requireAdmin, (req, res) => {
     if (promo && promo.promo_code) {
       db.prepare("UPDATE promo_codes SET used_count = used_count + 1 WHERE code = ?").run(promo.promo_code);
     }
+
+    // Log audit action
+    const newValues = {
+      status: "approved",
+      module_id: payment.module_id,
+      has_paid_access: payment.module_id ? student.has_paid_access : 1
+    };
+    logAuditAction(
+      req.session.user.id,
+      "payment_approved",
+      "payment_requests",
+      paymentId,
+      oldValues,
+      newValues,
+      `Payment approved for ${student.email} (${payment.module_id ? "module" : "full course"}, Amount: ${payment.amount})`
+    );
   });
 
   tx();
@@ -2821,14 +3036,27 @@ app.post("/admin/payments/:id/reject", requireAdmin, (req, res) => {
   const paymentId = Number(req.params.id);
   const adminNote = (req.body.admin_note || "").trim();
 
-  const payment = db.prepare("SELECT id FROM payment_requests WHERE id = ?").get(paymentId);
+  const payment = db.prepare("SELECT id, user_id, amount, status FROM payment_requests WHERE id = ?").get(paymentId);
   if (!payment) {
     return res.status(404).send("Payment request not found");
   }
 
+  const oldStatus = payment.status;
   db.prepare(
     "UPDATE payment_requests SET status = 'rejected', admin_note = ?, reviewed_at = CURRENT_TIMESTAMP WHERE id = ?"
   ).run(adminNote, paymentId);
+
+  // Log audit action
+  const student = db.prepare("SELECT email FROM users WHERE id = ?").get(payment.user_id);
+  logAuditAction(
+    req.session.user.id,
+    "payment_rejected",
+    "payment_requests",
+    paymentId,
+    { status: oldStatus },
+    { status: "rejected" },
+    `Payment rejected for ${student.email} (Amount: ${payment.amount}, Note: ${adminNote})`
+  );
 
   res.redirect("/admin");
 });
@@ -2846,7 +3074,19 @@ app.post("/admin/users/:id/access", requireAdmin, (req, res) => {
   }
 
   const hasPaidAccess = req.body.has_paid_access === "on" ? 1 : 0;
+  const oldAccess = user.has_paid_access;
   db.prepare("UPDATE users SET has_paid_access = ? WHERE id = ? AND is_admin = 0").run(hasPaidAccess, userId);
+
+  // Log audit action
+  logAuditAction(
+    req.session.user.id,
+    "user_access_changed",
+    "users",
+    userId,
+    { has_paid_access: oldAccess },
+    { has_paid_access: hasPaidAccess },
+    `${hasPaidAccess ? "Granted" : "Revoked"} paid access for ${user.email}`
+  );
 
   if (hasPaidAccess && !user.has_paid_access) {
     sendGroupInviteEmail(user.name, user.email, true).catch((e) => {
@@ -3151,7 +3391,7 @@ app.post("/admin/videos/:id/edit", requireAdmin, (req, res) => {
 
 app.post("/admin/videos/:id/delete", requireAdmin, (req, res) => {
   const videoId = Number(req.params.id);
-  const video = db.prepare("SELECT id, filename FROM videos WHERE id = ?").get(videoId);
+  const video = db.prepare("SELECT id, filename, title FROM videos WHERE id = ?").get(videoId);
 
   if (!video) {
     return res.status(404).send("Video not found");
@@ -3163,6 +3403,17 @@ app.post("/admin/videos/:id/delete", requireAdmin, (req, res) => {
   if (fs.existsSync(filePath)) {
     fs.unlinkSync(filePath);
   }
+
+  // Log audit action
+  logAuditAction(
+    req.session.user.id,
+    "video_deleted",
+    "videos",
+    videoId,
+    { title: video.title, filename: video.filename },
+    {},
+    `Video deleted: "${video.title}"`
+  );
 
   res.redirect("/admin");
 });
