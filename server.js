@@ -507,6 +507,7 @@ app.use(
     secret: SESSION_SECRET,
     resave: false,
     saveUninitialized: false,
+    rolling: true,
     cookie: {
       httpOnly: true,
       sameSite: "lax",
@@ -589,7 +590,7 @@ function requireAuth(req, res, next) {
   }
 
   const active = db
-    .prepare("SELECT id FROM active_sessions WHERE user_id = ? AND session_token = ? AND revoked_at IS NULL")
+    .prepare("SELECT id, last_seen_at FROM active_sessions WHERE user_id = ? AND session_token = ? AND revoked_at IS NULL")
     .get(req.session.user.id, req.session.sessionToken);
 
   if (!active) {
@@ -597,7 +598,17 @@ function requireAuth(req, res, next) {
     return res.redirect("/login");
   }
 
-  db.prepare("UPDATE active_sessions SET last_seen_at = CURRENT_TIMESTAMP WHERE id = ?").run(active.id);
+  const lastSeenMs = active.last_seen_at ? new Date(active.last_seen_at).getTime() : 0;
+  const refreshWindowMs = 10 * 60 * 1000;
+  if (!lastSeenMs || (Date.now() - lastSeenMs) >= refreshWindowMs) {
+    const newSessionToken = makeToken();
+    db.prepare("UPDATE active_sessions SET session_token = ?, last_seen_at = CURRENT_TIMESTAMP WHERE id = ?")
+      .run(newSessionToken, active.id);
+    req.session.sessionToken = newSessionToken;
+  } else {
+    db.prepare("UPDATE active_sessions SET last_seen_at = CURRENT_TIMESTAMP WHERE id = ?").run(active.id);
+  }
+
   next();
 }
 
@@ -764,6 +775,33 @@ async function sendResetEmail(email, token) {
   await sendEmail(email, subject, text, html);
 }
 
+async function sendAdminLockoutAlert(userId, minutesLocked) {
+  const lockedUser = db.prepare("SELECT id, name, email FROM users WHERE id = ?").get(userId);
+  if (!lockedUser) {
+    return;
+  }
+
+  const admins = db.prepare("SELECT email FROM users WHERE is_admin = 1").all();
+  if (!admins.length) {
+    return;
+  }
+
+  const to = admins.map((a) => a.email).join(",");
+  const subject = "Security alert: account lockout triggered";
+  const text = [
+    "A user account was locked due to repeated failed login attempts.",
+    `User: ${lockedUser.name} (${lockedUser.email})`,
+    `Lock duration: ${minutesLocked} minutes`,
+    `Time: ${new Date().toISOString()}`
+  ].join("\n");
+  const html = `<p>A user account was locked due to repeated failed login attempts.</p>
+    <p><strong>User:</strong> ${lockedUser.name} (${lockedUser.email})<br />
+    <strong>Lock duration:</strong> ${minutesLocked} minutes<br />
+    <strong>Time:</strong> ${new Date().toISOString()}</p>`;
+
+  await sendEmail(to, subject, text, html);
+}
+
 async function sendWelcomeEmail(name, email) {
   const loginUrl = `${BASE_URL}/login`;
   const forgotUrl = `${BASE_URL}/forgot-password`;
@@ -905,6 +943,9 @@ function lockAccount(userId, minutesLocked = 30) {
   const lockedUntil = new Date(Date.now() + minutesLocked * 60 * 1000).toISOString();
   db.prepare("UPDATE users SET locked_until = ? WHERE id = ?").run(lockedUntil, userId);
   logUserActivity(userId, "account_locked", `Account locked for ${minutesLocked} minutes`);
+  sendAdminLockoutAlert(userId, minutesLocked).catch((e) => {
+    console.error("Failed to send admin lockout alert", e);
+  });
 }
 
 function unlockAccount(userId) {
@@ -1742,13 +1783,22 @@ app.post("/reset-password", (req, res) => {
     return res.status(400).render("reset-password", { error: "Reset link is invalid or expired.", token: null });
   }
 
-  if (password.length < 6) {
-    return res.status(400).render("reset-password", { error: "Password must be at least 6 characters.", token });
+  const passwordCheck = validatePasswordStrength(password);
+  if (!passwordCheck.isValid) {
+    return res.status(400).render("reset-password", { error: passwordCheck.errors.join(" "), token });
+  }
+
+  if (isPasswordHistoryReused(row.user_id, password, 3)) {
+    return res.status(400).render("reset-password", {
+      error: "New password cannot match your last 3 passwords.",
+      token
+    });
   }
 
   const hash = bcrypt.hashSync(password, 10);
   const tx = db.transaction(() => {
     db.prepare("UPDATE users SET password_hash = ? WHERE id = ?").run(hash, row.user_id);
+    savePasswordToHistory(row.user_id, hash);
     db.prepare("UPDATE password_reset_tokens SET used_at = CURRENT_TIMESTAMP WHERE id = ?").run(row.id);
     db.prepare("UPDATE active_sessions SET revoked_at = CURRENT_TIMESTAMP WHERE user_id = ? AND revoked_at IS NULL").run(
       row.user_id
@@ -3112,6 +3162,11 @@ app.post("/admin/users/:id/delete", requireAdmin, (req, res) => {
     return res.status(400).send("You cannot delete your own account.");
   }
 
+  const userToDelete = db.prepare("SELECT id, name, email, is_admin FROM users WHERE id = ?").get(userId);
+  if (!userToDelete || userToDelete.is_admin) {
+    return res.status(404).send("User not found");
+  }
+
   const tx = db.transaction(() => {
     db.prepare("DELETE FROM active_sessions WHERE user_id = ?").run(userId);
     db.prepare("DELETE FROM email_verification_tokens WHERE user_id = ?").run(userId);
@@ -3129,6 +3184,17 @@ app.post("/admin/users/:id/delete", requireAdmin, (req, res) => {
   });
 
   tx();
+
+  logAuditAction(
+    req.session.user.id,
+    "user_deleted",
+    "users",
+    userId,
+    { email: userToDelete.email, name: userToDelete.name },
+    {},
+    `Admin deleted user ${userToDelete.email}`
+  );
+
   res.redirect("/admin");
 });
 
