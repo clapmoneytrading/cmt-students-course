@@ -352,7 +352,7 @@ function initDatabase() {
 
     CREATE TABLE IF NOT EXISTS audit_logs (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      admin_user_id INTEGER NOT NULL,
+      admin_user_id INTEGER,
       action TEXT NOT NULL,
       entity_type TEXT NOT NULL,
       entity_id INTEGER,
@@ -904,7 +904,7 @@ function getRecentFailedAttempts(email, minutesBack = 15) {
 function lockAccount(userId, minutesLocked = 30) {
   const lockedUntil = new Date(Date.now() + minutesLocked * 60 * 1000).toISOString();
   db.prepare("UPDATE users SET locked_until = ? WHERE id = ?").run(lockedUntil, userId);
-  logAuditAction(null, "account_locked", "users", userId, {}, {}, `Account locked for ${minutesLocked} minutes`);
+  logUserActivity(userId, "account_locked", `Account locked for ${minutesLocked} minutes`);
 }
 
 function unlockAccount(userId) {
@@ -925,6 +925,10 @@ function isAccountLocked(userId) {
 }
 
 function logAuditAction(adminUserId, action, entityType, entityId, oldValues = {}, newValues = {}, description = "") {
+  if (!adminUserId) {
+    return;
+  }
+
   db.prepare(
     "INSERT INTO audit_logs (admin_user_id, action, entity_type, entity_id, old_values, new_values, description) VALUES (?, ?, ?, ?, ?, ?, ?)"
   ).run(
@@ -1529,7 +1533,9 @@ app.post("/register", async (req, res) => {
     savePasswordToHistory(newUser.id, hash);
   }
 
-  logAuditAction(null, "user_registration", "users", newUser.id, {}, { email }, "New user registered");
+  if (newUser) {
+    logUserActivity(newUser.id, "user_registration", email);
+  }
 
   return res.redirect("/login?message=register_success");
 });
@@ -1631,7 +1637,6 @@ app.post("/login", (req, res) => {
   }
 
   logUserActivity(user.id, "login", req.get("user-agent") || "");
-  logAuditAction(null, "user_login", "users", user.id, {}, {}, `User logged in from ${ipAddress}`);
 
   res.redirect("/dashboard");
 });
