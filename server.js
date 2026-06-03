@@ -1618,18 +1618,22 @@ app.post("/login", (req, res) => {
   const sessionToken = makeToken();
   req.session.sessionToken = sessionToken;
 
-  db.prepare("INSERT INTO active_sessions (user_id, session_token, user_agent) VALUES (?, ?, ?)").run(
+  const insertedSession = db.prepare("INSERT INTO active_sessions (user_id, session_token, user_agent) VALUES (?, ?, ?)").run(
     user.id,
     sessionToken,
     (req.get("user-agent") || "").slice(0, 255)
   );
+  const currentSessionId = Number(insertedSession.lastInsertRowid);
 
   const activeSessions = db
-    .prepare("SELECT id FROM active_sessions WHERE user_id = ? AND revoked_at IS NULL ORDER BY created_at DESC")
+    .prepare("SELECT id FROM active_sessions WHERE user_id = ? AND revoked_at IS NULL ORDER BY id DESC")
     .all(user.id);
 
   if (activeSessions.length > MAX_ACTIVE_SESSIONS) {
-    const overflow = activeSessions.slice(MAX_ACTIVE_SESSIONS).map((row) => row.id);
+    const overflow = activeSessions
+      .slice(MAX_ACTIVE_SESSIONS)
+      .map((row) => row.id)
+      .filter((id) => id !== currentSessionId);
     if (overflow.length) {
       const placeholders = overflow.map(() => "?").join(",");
       db.prepare(`UPDATE active_sessions SET revoked_at = CURRENT_TIMESTAMP WHERE id IN (${placeholders})`).run(...overflow);
