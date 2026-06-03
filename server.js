@@ -2044,12 +2044,76 @@ app.get("/payment-proof/:id", requireAdmin, (req, res) => {
   res.sendFile(filePath);
 });
 
-app.get("/video/:id", requireAuth, (req, res) => {
+// Generate a secure session token for video playback
+const videoTokens = new Map(); // videoId -> { token, userId, expiresAt }
+
+function generateVideoToken(videoId, userId) {
+  const token = require("crypto").randomBytes(32).toString("hex");
+  const expiresAt = Date.now() + 3600000; // 1 hour expiry
+  videoTokens.set(`${videoId}:${token}`, { userId, expiresAt });
+  // Cleanup old tokens
+  if (videoTokens.size > 10000) {
+    for (const [key, val] of videoTokens.entries()) {
+      if (val.expiresAt < Date.now()) {
+        videoTokens.delete(key);
+      }
+    }
+  }
+  return token;
+}
+
+function validateVideoToken(videoId, token, userId) {
+  const key = `${videoId}:${token}`;
+  const tokenData = videoTokens.get(key);
+  if (!tokenData) return false;
+  if (tokenData.expiresAt < Date.now()) {
+    videoTokens.delete(key);
+    return false;
+  }
+  if (tokenData.userId !== userId) return false;
+  return true;
+}
+
+// API endpoint to get video playback token
+app.get("/api/video-token/:id", requireAuth, (req, res) => {
   refreshSessionUser(req, req.session.user.id);
+  const videoId = parseInt(req.params.id, 10);
 
   const video = db
     .prepare("SELECT v.*, m.access_type AS module_access_type FROM videos v LEFT JOIN modules m ON m.id = v.module_id WHERE v.id = ?")
-    .get(req.params.id);
+    .get(videoId);
+  
+  if (!video) {
+    return res.status(404).json({ error: "Video not found" });
+  }
+
+  const moduleAccessSet = getUserModuleAccessSet(req.session.user.id);
+  const hasModuleAccess = video.module_id && moduleAccessSet.has(video.module_id);
+  const moduleLocked = video.module_access_type === "paid" && !req.session.user.has_paid_access && !req.session.user.is_admin && !hasModuleAccess;
+  const canWatch = video.access_type === "free" || req.session.user.has_paid_access || hasModuleAccess;
+  
+  if ((moduleLocked || !canWatch) && !req.session.user.is_admin) {
+    return res.status(403).json({ error: "You do not have access to this video." });
+  }
+
+  const token = generateVideoToken(videoId, req.session.user.id);
+  res.json({ token, videoId });
+});
+
+app.get("/video/:id", requireAuth, (req, res) => {
+  refreshSessionUser(req, req.session.user.id);
+  const videoId = parseInt(req.params.id, 10);
+  const token = req.query.token;
+
+  // Token-based validation
+  if (!token || !validateVideoToken(videoId, token, req.session.user.id)) {
+    return res.status(403).send("Unauthorized video access");
+  }
+
+  const video = db
+    .prepare("SELECT v.*, m.access_type AS module_access_type FROM videos v LEFT JOIN modules m ON m.id = v.module_id WHERE v.id = ?")
+    .get(videoId);
+  
   if (!video) {
     return res.status(404).send("Video not found");
   }
@@ -2068,7 +2132,25 @@ app.get("/video/:id", requireAuth, (req, res) => {
 
   const externalUrl = (video.external_url || "").trim();
   if (externalUrl) {
-    return res.redirect(externalUrl);
+    const parsedUrl = new URL(externalUrl);
+    const protocol = parsedUrl.protocol === "https:" ? require("https") : require("http");
+    const proxyReq = protocol.get(externalUrl, (proxyRes) => {
+      res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, private");
+      res.setHeader("Pragma", "no-cache");
+      res.setHeader("Expires", "0");
+      res.setHeader("Accept-Ranges", "none");
+      res.setHeader("X-Content-Type-Options", "nosniff");
+      res.setHeader("Content-Security-Policy", "default-src 'self'; script-src 'self'");
+      const ct = proxyRes.headers["content-type"] || "video/mp4";
+      res.setHeader("Content-Type", ct);
+      if (proxyRes.headers["content-length"]) {
+        res.setHeader("Content-Length", proxyRes.headers["content-length"]);
+      }
+      res.status(proxyRes.statusCode || 200);
+      proxyRes.pipe(res);
+    });
+    proxyReq.on("error", () => res.status(502).send("Failed to load video."));
+    return;
   }
 
   const filePath = path.join(uploadDir, video.filename);
@@ -2081,6 +2163,8 @@ app.get("/video/:id", requireAuth, (req, res) => {
   res.setHeader("Expires", "0");
   res.setHeader("Accept-Ranges", "none");
   res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("Content-Security-Policy", "default-src 'self'; script-src 'self'");
+  res.setHeader("X-Frame-Options", "DENY");
 
   res.type(video.mime_type);
   res.sendFile(filePath);
