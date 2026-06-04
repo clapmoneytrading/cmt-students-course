@@ -16,6 +16,9 @@ const unzipper = require("unzipper");
 
 const app = express();
 
+// Required for secure cookies when running behind Render/HTTPS proxy.
+app.set("trust proxy", 1);
+
 function createZipArchive(options = { zlib: { level: 9 } }) {
   if (typeof archiverModule === "function") {
     return archiverModule("zip", options);
@@ -507,6 +510,7 @@ app.use(
     secret: SESSION_SECRET,
     resave: false,
     saveUninitialized: false,
+    proxy: true,
     rolling: true,
     cookie: {
       httpOnly: true,
