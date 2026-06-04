@@ -2405,24 +2405,72 @@ app.get("/video/:id", requireAuth, (req, res) => {
 
   const externalUrl = (video.external_url || "").trim();
   if (externalUrl) {
-    const parsedUrl = new URL(externalUrl);
-    const protocol = parsedUrl.protocol === "https:" ? require("https") : require("http");
-    const proxyReq = protocol.get(externalUrl, (proxyRes) => {
-      res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, private");
-      res.setHeader("Pragma", "no-cache");
-      res.setHeader("Expires", "0");
-      res.setHeader("Accept-Ranges", "none");
-      res.setHeader("X-Content-Type-Options", "nosniff");
-      res.setHeader("Content-Security-Policy", "default-src 'self'; script-src 'self'");
-      const ct = proxyRes.headers["content-type"] || "video/mp4";
-      res.setHeader("Content-Type", ct);
-      if (proxyRes.headers["content-length"]) {
-        res.setHeader("Content-Length", proxyRes.headers["content-length"]);
+    const requestExternal = (urlToFetch, redirectCount = 0) => {
+      const parsedUrl = new URL(urlToFetch);
+      const protocol = parsedUrl.protocol === "https:" ? require("https") : require("http");
+      const requestHeaders = {
+        "user-agent": (req.get("user-agent") || "Mozilla/5.0").slice(0, 255),
+        accept: req.get("accept") || "*/*"
+      };
+      const incomingRange = req.get("range");
+      if (incomingRange) {
+        requestHeaders.range = incomingRange;
       }
-      res.status(proxyRes.statusCode || 200);
-      proxyRes.pipe(res);
-    });
-    proxyReq.on("error", () => res.status(502).send("Failed to load video."));
+
+      const proxyReq = protocol.get(urlToFetch, { headers: requestHeaders }, (proxyRes) => {
+        const statusCode = proxyRes.statusCode || 502;
+        const location = proxyRes.headers.location;
+
+        if ([301, 302, 303, 307, 308].includes(statusCode) && location) {
+          if (redirectCount >= 5) {
+            proxyRes.resume();
+            return res.status(502).send("External video redirected too many times.");
+          }
+          proxyRes.resume();
+          const nextUrl = new URL(location, urlToFetch).toString();
+          return requestExternal(nextUrl, redirectCount + 1);
+        }
+
+        if (statusCode >= 400) {
+          proxyRes.resume();
+          return res.status(502).send("Failed to load external video.");
+        }
+
+        res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, private");
+        res.setHeader("Pragma", "no-cache");
+        res.setHeader("Expires", "0");
+        res.setHeader("X-Content-Type-Options", "nosniff");
+
+        const passthroughHeaders = [
+          "content-type",
+          "content-length",
+          "accept-ranges",
+          "content-range",
+          "etag",
+          "last-modified"
+        ];
+        passthroughHeaders.forEach((headerName) => {
+          if (proxyRes.headers[headerName]) {
+            res.setHeader(headerName, proxyRes.headers[headerName]);
+          }
+        });
+
+        if (!proxyRes.headers["content-type"]) {
+          res.setHeader("content-type", "video/mp4");
+        }
+
+        res.status(statusCode);
+        proxyRes.pipe(res);
+      });
+
+      proxyReq.on("error", () => {
+        if (!res.headersSent) {
+          res.status(502).send("Failed to load video.");
+        }
+      });
+    };
+
+    requestExternal(externalUrl);
     return;
   }
 
