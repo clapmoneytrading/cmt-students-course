@@ -1025,8 +1025,25 @@ function restoreDatabaseFromSqliteFile(sourcePath) {
     const tx = db.transaction(() => {
       for (const tableName of restoreTables) {
         const q = quoteIdentifier(tableName);
+
+        const targetColumns = db
+          .prepare(`PRAGMA main.table_info(${q})`)
+          .all()
+          .map((c) => c.name);
+        const sourceColumns = db
+          .prepare(`PRAGMA restore_src.table_info(${q})`)
+          .all()
+          .map((c) => c.name);
+
+        const sourceSet = new Set(sourceColumns);
+        const commonColumns = targetColumns.filter((name) => sourceSet.has(name));
+        if (!commonColumns.length) {
+          continue;
+        }
+
+        const cols = commonColumns.map((name) => quoteIdentifier(name)).join(", ");
         db.exec(`DELETE FROM main.${q}`);
-        db.exec(`INSERT INTO main.${q} SELECT * FROM restore_src.${q}`);
+        db.exec(`INSERT INTO main.${q} (${cols}) SELECT ${cols} FROM restore_src.${q}`);
       }
     });
 
