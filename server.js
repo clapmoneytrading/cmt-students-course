@@ -2317,33 +2317,43 @@ app.get("/payment-proof/:id", requireAdmin, (req, res) => {
   res.sendFile(filePath);
 });
 
-// Generate a secure session token for video playback
-const videoTokens = new Map(); // videoId -> { token, userId, expiresAt }
+// Generate secure per-session tokens for video playback (no fixed TTL; valid until session ends)
+const videoTokens = new Map(); // token -> { videoId, userId, sessionId, createdAt }
 
-function generateVideoToken(videoId, userId) {
+function generateVideoToken(videoId, userId, sessionId) {
   const token = require("crypto").randomBytes(32).toString("hex");
-  const expiresAt = Date.now() + 3600000; // 1 hour expiry
-  videoTokens.set(`${videoId}:${token}`, { userId, expiresAt });
-  // Cleanup old tokens
-  if (videoTokens.size > 10000) {
-    for (const [key, val] of videoTokens.entries()) {
-      if (val.expiresAt < Date.now()) {
-        videoTokens.delete(key);
+  videoTokens.set(token, { videoId, userId, sessionId, createdAt: Date.now() });
+
+  // Keep memory bounded by dropping oldest tokens.
+  if (videoTokens.size > 20000) {
+    const removeCount = videoTokens.size - 15000;
+    let i = 0;
+    for (const key of videoTokens.keys()) {
+      videoTokens.delete(key);
+      i += 1;
+      if (i >= removeCount) {
+        break;
       }
     }
   }
+
   return token;
 }
 
-function validateVideoToken(videoId, token, userId) {
-  const key = `${videoId}:${token}`;
-  const tokenData = videoTokens.get(key);
-  if (!tokenData) return false;
-  if (tokenData.expiresAt < Date.now()) {
-    videoTokens.delete(key);
+function validateVideoToken(videoId, token, userId, sessionId) {
+  const tokenData = videoTokens.get(token);
+  if (!tokenData) {
     return false;
   }
-  if (tokenData.userId !== userId) return false;
+  if (tokenData.videoId !== videoId) {
+    return false;
+  }
+  if (tokenData.userId !== userId) {
+    return false;
+  }
+  if (tokenData.sessionId !== sessionId) {
+    return false;
+  }
   return true;
 }
 
@@ -2369,7 +2379,7 @@ app.get("/api/video-token/:id", requireAuth, (req, res) => {
     return res.status(403).json({ error: "You do not have access to this video." });
   }
 
-  const token = generateVideoToken(videoId, req.session.user.id);
+  const token = generateVideoToken(videoId, req.session.user.id, req.sessionID);
   res.json({ token, videoId });
 });
 
@@ -2379,7 +2389,7 @@ app.get("/video/:id", requireAuth, (req, res) => {
   const token = req.query.token;
 
   // Token-based validation
-  if (!token || !validateVideoToken(videoId, token, req.session.user.id)) {
+  if (!token || !validateVideoToken(videoId, token, req.session.user.id, req.sessionID)) {
     return res.status(403).send("Unauthorized video access");
   }
 
@@ -2410,7 +2420,9 @@ app.get("/video/:id", requireAuth, (req, res) => {
       const protocol = parsedUrl.protocol === "https:" ? require("https") : require("http");
       const requestHeaders = {
         "user-agent": (req.get("user-agent") || "Mozilla/5.0").slice(0, 255),
-        accept: req.get("accept") || "*/*"
+        accept: req.get("accept") || "*/*",
+        referer: parsedUrl.origin + "/",
+        origin: parsedUrl.origin
       };
       const incomingRange = req.get("range");
       if (incomingRange) {
@@ -2433,7 +2445,7 @@ app.get("/video/:id", requireAuth, (req, res) => {
 
         if (statusCode >= 400) {
           proxyRes.resume();
-          return res.status(502).send("Failed to load external video.");
+          return res.redirect(urlToFetch);
         }
 
         res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, private");
@@ -2465,7 +2477,7 @@ app.get("/video/:id", requireAuth, (req, res) => {
 
       proxyReq.on("error", () => {
         if (!res.headersSent) {
-          res.status(502).send("Failed to load video.");
+          res.redirect(urlToFetch);
         }
       });
     };
